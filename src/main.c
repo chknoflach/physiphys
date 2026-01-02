@@ -14,7 +14,7 @@ typedef struct {
 } physics_body;
 
 typedef struct {
-    physics_body    *items;
+    physics_body    **items;
     int             count;
     int             capacity;
 } physics_collection;
@@ -44,6 +44,7 @@ static const physics_body DEFAULT_BODY = {
 };
 
 physics_body    *create_physics_body(void);
+void            add_to_collection(physics_collection *, physics_body *);
 
 int main(void)
 {
@@ -66,6 +67,7 @@ int main(void)
     bd->mass = 10.0f;
     bd->drag = 0.02f;
     bd->pos.x = gfx.width / 2;
+//    add_to_collection(&bodies, bd);
 
     InitWindow(gfx.width, gfx.height, "raylib test");
     SetTargetFPS(gfx.fps);
@@ -102,6 +104,17 @@ int main(void)
     }
     CloseWindow();
     return (0);
+}
+
+void    add_to_collection(physics_collection *cl, physics_body *bd)
+{
+    if (!cl->capacity || cl->count >= cl->capacity)
+    {
+        cl->items = realloc(cl->items, sizeof(*bd) * (cl->capacity + MEM_STEP));
+        cl->capacity += MEM_STEP;
+    }
+    cl->items[cl->count] = bd;
+    cl->count++;
 }
 
 physics_body    *create_physics_body()
