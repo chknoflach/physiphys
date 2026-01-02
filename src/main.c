@@ -119,38 +119,35 @@ void    update_physics(gfx_settings *gfx, physics_settings *phy,
     {
         for (size_t i = 0; i < c->count; i++)
         {
-            physics_body    b = c->items[i];
-            size_t          floor = gfx->height;
-            float           acc_y = (phy->g_px * b.g_tweak) -
-                (b.drag / b.mass) * b.v.y * fabsf(b.v.y);
+            float           acc_y = 0.0f; 
             bool            settled = false;
-    
-            for (int j = 0; j < floorf(b.dim.x); j++)
-                settled = (floorf(b.pos.y) >= floor - phy->col[(int)floorf(b.pos.x) + j]);
+            size_t          ix = roundf(c->items[i].pos.x);
+            size_t          iy = roundf(c->items[i].pos.y);
+            size_t          iw = roundf(c->items[i].dim.x);
+            size_t          ih = roundf(c->items[i].dim.y);
+            size_t          y_max = gfx->height;
+
+            for (size_t j = 0; j < iw; j++)
+            {
+                if (y_max > gfx->height - phy->col[ix + j])
+                    y_max = gfx->height - phy->col[ix + j];
+            }
+
+            if ((iy + ih) >= y_max)
+            {
+                c->items[i].pos.y = y_max - ih;
+                for (size_t j = 0; j < iw; j++)
+                    phy->col[ix + j] = y_max - ih;
+                settled = true;
+            }
+
             if (settled)
                 continue;
-
-            b.v.y += acc_y * phy->dt;
-            b.pos.y += b.v.y * phy->dt;
-
-            // affected cols: col[x] ... col[x + b.dim.x
-            for (int j = 0; j < floorf(b.dim.x); j++)
-            {
-                if (gfx->height - phy->col[(int)floorf(b.pos.x) + j] < floor)
-                    floor = gfx->height - phy->col[(int)floorf(b.pos.x) + j];
-            }
-
-            if (floorf(b.pos.y) >= (floor - floorf(b.dim.y)))
-            {
-                TraceLog(LOG_INFO, "collided at %d (%f)", floor, floorf(b.pos.y));
-                b.v.y = 0;
-                b.pos.y = floorf(floor - floorf(b.dim.y));
-                for (int j = 0; j < (int)floorf(b.dim.x); j++)
-                    phy->col[(int)floorf(b.pos.x) + j] += (size_t)floorf(b.dim.y);
-            }
-            else
-                TraceLog(LOG_INFO, "fine at %d (%f)", floor, floorf(b.pos.y));
-            c->items[i] = b;
+    
+            acc_y = (phy->g_px * c->items[i].g_tweak) -
+                (c->items[i].drag / c->items[i].mass) * c->items[i].v.y * fabsf(c->items[i].v.y);
+            c->items[i].v.y += acc_y * phy->dt;
+            c->items[i].pos.y += c->items[i].v.y * phy->dt;
         }
 
         phy->dt_acc -= phy->dt;
