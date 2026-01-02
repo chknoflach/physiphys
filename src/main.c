@@ -15,7 +15,7 @@ typedef struct {
 } physics_body;
 
 typedef struct {
-    physics_body    **items;
+    physics_body    *items;
     size_t          count;
     size_t          capacity;
 } physics_collection;
@@ -47,35 +47,17 @@ static const physics_body DEFAULT_BODY = {
     .dim.z = 1.0f
 };
 
-physics_body    *create_physics_body(void);
-void            add_to_collection(physics_collection *, physics_body *);
+physics_body    create_physics_body(float, float, float, float, float);
+void            add_to_collection(physics_collection *, physics_body);
 void            update_physics(gfx_settings *, physics_settings *,
                     physics_collection *, float);
 
-void            _reset(gfx_settings *gfx, physics_collection *c)
+void            _reset(physics_collection *c)
 {
-    physics_body    *bd;
-    size_t          count = 7;
-
-    if (c->count != count)
-    {
-        // TODO: free old memory and stuff
-        for (size_t i = 0; i < count; i++)
-        {
-            bd = create_physics_body();
-            add_to_collection(c, bd);
-        }
-    }
-    for (size_t i = 0; i < count; i++)
-    {
-        bd = c->items[i];
-        *bd = DEFAULT_BODY;
-        bd->mass = 10.0f * (i + 1);
-        bd->drag = 0.2f / (i + 1);
-        bd->pos.x = (gfx->width / count) * (i + 1) - (gfx->width / count) / 2;
-        bd->dim.y = (i + 1);
-        bd->dim.x = (i + 1);
-    }
+    c->count = 0;
+    c->capacity = 0;
+    free(c->items);
+    c->items = NULL;
 }
 
 int main(void)
@@ -84,7 +66,6 @@ int main(void)
     physics_settings phys = {0};
     physics_collection bodies = {0};
     float dt;
-    physics_body *bd;
     
     gfx.width = 800;
     gfx.height = 600;
@@ -95,8 +76,6 @@ int main(void)
     phys.fps = 240;
     phys.dt = 1.0f / phys.fps;
     
-    _reset(&gfx, &bodies);
-
     InitWindow(gfx.width, gfx.height, "raylib test");
     SetTargetFPS(gfx.fps);
 
@@ -105,16 +84,23 @@ int main(void)
         dt = GetFrameTime();
 
         if (IsKeyPressed(KEY_R))
-            _reset(&gfx, &bodies);
+            _reset(&bodies);
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+        {
+            physics_body    bd = create_physics_body(2.0f, 0.2f, 10.0f, 10.0f, 10.0f);
+            bd.pos = GetMousePosition();
+            add_to_collection(&bodies, bd);
+        }
         update_physics(&gfx, &phys, &bodies, dt);
 
         BeginDrawing();
         ClearBackground(BLACK);
         for (size_t i = 0; i < bodies.count; i++)
         {
-            bd = bodies.items[i];
-            DrawRectangleLines(bd->pos.x, bd->pos.y, bd->dim.x, bd->dim.y, RED);
-            DrawPixel(bd->pos.x, bd->pos.y, WHITE);
+            DrawRectangleLines(bodies.items[i].pos.x, bodies.items[i].pos.y,
+                    bodies.items[i].dim.x, bodies.items[i].dim.y,
+                    RED);
+            DrawPixel(bodies.items[i].pos.x, bodies.items[i].pos.y, WHITE);
         }
         EndDrawing();
     }
@@ -125,25 +111,23 @@ int main(void)
 void    update_physics(gfx_settings *g, physics_settings *s,
         physics_collection *c, float dt)
 {
-    physics_body *bd;
     s->dt_acc += dt;
 
     while (s->dt_acc >= s->dt)
     {
         for (size_t i = 0; i < c->count; i++)
         {
-            bd = c->items[i];
-            float acc_y = (s->g_px * bd->g_tweak)
-                - (bd->drag / bd->mass)
-                    * bd->v.y * fabsf(bd->v.y);
+            float acc_y = (s->g_px * c->items[i].g_tweak)
+                - (c->items[i].drag / c->items[i].mass)
+                    * c->items[i].v.y * fabsf(c->items[i].v.y);
     
-            bd->v.y += acc_y * s->dt;
-            bd->pos.y += bd->v.y * s->dt;
+            c->items[i].v.y += acc_y * s->dt;
+            c->items[i].pos.y += c->items[i].v.y * s->dt;
 
-            if (bd->pos.y >= (g->height - bd->dim.y))
+            if (c->items[i].pos.y >= (g->height - c->items[i].dim.y))
             {
-                bd->v.y = 0;
-                bd->pos.y = g->height - bd->dim.y;
+                c->items[i].v.y = 0;
+                c->items[i].pos.y = g->height - c->items[i].dim.y;
             }
         }
 
@@ -151,22 +135,27 @@ void    update_physics(gfx_settings *g, physics_settings *s,
     }
 }
 
-void    add_to_collection(physics_collection *cl, physics_body *bd)
+void    add_to_collection(physics_collection *cl, physics_body bd)
 {
     if (!cl->capacity || cl->count >= cl->capacity)
     {
-        cl->items = realloc(cl->items, sizeof(*bd) * (cl->capacity + MEM_STEP));
+        cl->items = realloc(cl->items, sizeof(bd) * (cl->capacity + MEM_STEP));
         cl->capacity += MEM_STEP;
     }
     cl->items[cl->count] = bd;
     cl->count++;
 }
 
-physics_body    *create_physics_body()
+physics_body    create_physics_body(float mass, float drag, float x, float y, float z)
 {
-    physics_body    *body;
+    physics_body    bd;
 
-    body = malloc(sizeof(*body));
-    *body = DEFAULT_BODY;
-    return (body);
+    bd = DEFAULT_BODY;
+    bd.mass = mass;
+    bd.drag = drag;
+    bd.dim.x = x;
+    bd.dim.y = y;
+    bd.dim.z = z;
+    return (bd);
 }
+
