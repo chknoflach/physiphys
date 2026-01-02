@@ -26,6 +26,7 @@ typedef struct {
     size_t  fps;
     float   dt;
     float   dt_acc;
+    size_t  *col;
 } physics_settings;
 
 typedef struct {
@@ -71,6 +72,7 @@ int main(void)
     gfx.height = 600;
     gfx.fps = 60;
 
+    phys.col = calloc(gfx.width, sizeof(*phys.col));
     phys.g = 9.81f;
     phys.g_px = phys.g * 200.0f;
     phys.fps = 240;
@@ -108,30 +110,50 @@ int main(void)
     return (0);
 }
 
-void    update_physics(gfx_settings *g, physics_settings *s,
+void    update_physics(gfx_settings *gfx, physics_settings *phy,
         physics_collection *c, float dt)
 {
-    s->dt_acc += dt;
+    phy->dt_acc += dt;
 
-    while (s->dt_acc >= s->dt)
+    while (phy->dt_acc >= phy->dt)
     {
         for (size_t i = 0; i < c->count; i++)
         {
-            float acc_y = (s->g_px * c->items[i].g_tweak)
-                - (c->items[i].drag / c->items[i].mass)
-                    * c->items[i].v.y * fabsf(c->items[i].v.y);
+            physics_body    b = c->items[i];
+            size_t          floor = gfx->height;
+            float           acc_y = (phy->g_px * b.g_tweak) -
+                (b.drag / b.mass) * b.v.y * fabsf(b.v.y);
+            bool            settled = false;
     
-            c->items[i].v.y += acc_y * s->dt;
-            c->items[i].pos.y += c->items[i].v.y * s->dt;
+            for (int j = 0; j < floorf(b.dim.x); j++)
+                settled = (floorf(b.pos.y) >= floor - phy->col[(int)floorf(b.pos.x) + j]);
+            if (settled)
+                continue;
 
-            if (c->items[i].pos.y >= (g->height - c->items[i].dim.y))
+            b.v.y += acc_y * phy->dt;
+            b.pos.y += b.v.y * phy->dt;
+
+            // affected cols: col[x] ... col[x + b.dim.x
+            for (int j = 0; j < floorf(b.dim.x); j++)
             {
-                c->items[i].v.y = 0;
-                c->items[i].pos.y = g->height - c->items[i].dim.y;
+                if (gfx->height - phy->col[(int)floorf(b.pos.x) + j] < floor)
+                    floor = gfx->height - phy->col[(int)floorf(b.pos.x) + j];
             }
+
+            if (floorf(b.pos.y) >= (floor - floorf(b.dim.y)))
+            {
+                TraceLog(LOG_INFO, "collided at %d (%f)", floor, floorf(b.pos.y));
+                b.v.y = 0;
+                b.pos.y = floorf(floor - floorf(b.dim.y));
+                for (int j = 0; j < (int)floorf(b.dim.x); j++)
+                    phy->col[(int)floorf(b.pos.x) + j] += (size_t)floorf(b.dim.y);
+            }
+            else
+                TraceLog(LOG_INFO, "fine at %d (%f)", floor, floorf(b.pos.y));
+            c->items[i] = b;
         }
 
-        s->dt_acc -= s->dt;
+        phy->dt_acc -= phy->dt;
     }
 }
 
