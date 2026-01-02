@@ -15,22 +15,22 @@ typedef struct {
 
 typedef struct {
     physics_body    **items;
-    int             count;
-    int             capacity;
+    size_t          count;
+    size_t          capacity;
 } physics_collection;
 
 typedef struct {
     float   g;
-    int     g_px;
-    int     fps;
+    size_t  g_px;
+    size_t  fps;
     float   dt;
     float   dt_acc;
 } physics_settings;
 
 typedef struct {
-    int     width;
-    int     height;
-    int     fps;
+    size_t  width;
+    size_t  height;
+    size_t  fps;
 } gfx_settings;
 
 static const physics_body DEFAULT_BODY = {
@@ -67,7 +67,7 @@ int main(void)
     bd->mass = 10.0f;
     bd->drag = 0.02f;
     bd->pos.x = gfx.width / 2;
-//    add_to_collection(&bodies, bd);
+    add_to_collection(&bodies, bd);
 
     InitWindow(gfx.width, gfx.height, "raylib test");
     SetTargetFPS(gfx.fps);
@@ -79,27 +79,35 @@ int main(void)
 
         while (phys.dt_acc >= phys.dt)
         {
-            float acc_y = (phys.g_px * bd->g_tweak)
-                - (bd->drag / bd->mass)
-                    * bd->v.y * fabsf(bd->v.y);
-    
-            bd->v.y += acc_y * phys.dt;
-            bd->pos.y += bd->v.y * phys.dt;
-
-            if (bd->pos.y > gfx.height)
+            for (size_t i = 0; i < bodies.count; i++)
             {
-                bd->v.y = bd->pos.y = 0.0f;
-                bd->pos.x += 2.0f;
-                if (bd->pos.x > gfx.width)
-                    bd->pos.x = 0.0f;
-                bd->mass += 1.0f;
+                bd = bodies.items[i];
+                float acc_y = (phys.g_px * bd->g_tweak)
+                    - (bd->drag / bd->mass)
+                        * bd->v.y * fabsf(bd->v.y);
+        
+                bd->v.y += acc_y * phys.dt;
+                bd->pos.y += bd->v.y * phys.dt;
+    
+                if (bd->pos.y > gfx.height)
+                {
+                    bd->v.y = bd->pos.y = 0.0f;
+                    bd->pos.x += 2.0f;
+                    if (bd->pos.x > gfx.width)
+                        bd->pos.x = 0.0f;
+                    bd->mass += 1.0f;
+                }
             }
 
             phys.dt_acc -= phys.dt;
         }
 
         BeginDrawing();
-        DrawPixel(bd->pos.x, bd->pos.y, RED);
+        for (size_t i = 0; i < bodies.count; i++)
+        {
+            bd = bodies.items[i];
+            DrawPixel(bd->pos.x, bd->pos.y, RED);
+        }
         EndDrawing();
     }
     CloseWindow();
