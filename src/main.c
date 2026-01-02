@@ -1,9 +1,8 @@
 #include "raylib.h"
 #include <stdio.h>
 #include <math.h>
+#include <stdlib.h>
 
-#define FPS 240
-#define FPS_PHYS 120
 #define MEM_STEP 64
 
 typedef struct {
@@ -34,11 +33,26 @@ typedef struct {
     int     fps;
 } gfx_settings;
 
+static const physics_body DEFAULT_BODY = {
+    .mass = 1.0f,
+    .drag = 0.2f,
+    .g_tweak = 1.0f,
+    .pos.x = 0.0f,
+    .pos.y = 0.0f,
+    .v.x = 0.0f,
+    .v.y = 0.0f
+};
+
+physics_body    *create_physics_body(void);
+
 int main(void)
 {
     gfx_settings gfx = {0};
     physics_settings phys = {0};
-
+    physics_collection bodies = {0};
+    float dt;
+    physics_body *bd;
+    
     gfx.width = 800;
     gfx.height = 600;
     gfx.fps = 60;
@@ -47,17 +61,11 @@ int main(void)
     phys.g_px = phys.g * 5000.0f;
     phys.fps = 120;
     phys.dt = 1.0f / phys.fps;
-
-    float dt;
-    physics_body bd;
     
-    bd.mass = 10.0f;
-    bd.drag = 0.02f;
-    bd.g_tweak = 2.0f;
-    bd.pos.x = gfx.width / 2;
-    bd.pos.y = 0.0f;
-    bd.v.x = 0.0f;
-    bd.v.y = 0.0f;
+    bd = create_physics_body();
+    bd->mass = 10.0f;
+    bd->drag = 0.02f;
+    bd->pos.x = gfx.width / 2;
 
     InitWindow(gfx.width, gfx.height, "raylib test");
     SetTargetFPS(gfx.fps);
@@ -69,29 +77,38 @@ int main(void)
 
         while (phys.dt_acc >= phys.dt)
         {
-            float acc_y = (phys.g_px * bd.g_tweak)
-                - (bd.drag / bd.mass)
-                    * bd.v.y * fabsf(bd.v.y);
+            float acc_y = (phys.g_px * bd->g_tweak)
+                - (bd->drag / bd->mass)
+                    * bd->v.y * fabsf(bd->v.y);
     
-            bd.v.y += acc_y * phys.dt;
-            bd.pos.y += bd.v.y * phys.dt;
+            bd->v.y += acc_y * phys.dt;
+            bd->pos.y += bd->v.y * phys.dt;
 
-            if (bd.pos.y > gfx.height)
+            if (bd->pos.y > gfx.height)
             {
-                bd.v.y = bd.pos.y = 0.0f;
-                bd.pos.x += 2.0f;
-                if (bd.pos.x > gfx.width)
-                    bd.pos.x = 0.0f;
-                bd.mass += 1.0f;
+                bd->v.y = bd->pos.y = 0.0f;
+                bd->pos.x += 2.0f;
+                if (bd->pos.x > gfx.width)
+                    bd->pos.x = 0.0f;
+                bd->mass += 1.0f;
             }
 
             phys.dt_acc -= phys.dt;
         }
 
         BeginDrawing();
-        DrawPixel(bd.pos.x, bd.pos.y, RED);
+        DrawPixel(bd->pos.x, bd->pos.y, RED);
         EndDrawing();
     }
     CloseWindow();
     return (0);
+}
+
+physics_body    *create_physics_body()
+{
+    physics_body    *body;
+
+    body = malloc(sizeof(*body));
+    *body = DEFAULT_BODY;
+    return (body);
 }
