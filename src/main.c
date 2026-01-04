@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define MEM_STEP 64
 
@@ -53,12 +54,14 @@ void            add_to_collection(physics_collection *, physics_body);
 void            update_physics(gfx_settings *, physics_settings *,
                     physics_collection *, float);
 
-void            _reset(physics_collection *c)
+void _reset(gfx_settings *gfx, physics_settings *phy,
+        physics_collection *c)
 {
     c->count = 0;
     c->capacity = 0;
     free(c->items);
     c->items = NULL;
+    memset(phy->col, 0, gfx->width * sizeof(*phy->col));
 }
 
 int main(void)
@@ -86,7 +89,7 @@ int main(void)
         dt = GetFrameTime();
 
         if (IsKeyPressed(KEY_R))
-            _reset(&bodies);
+            _reset(&gfx, &phys, &bodies);
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
         {
             physics_body    bd = create_physics_body(2.0f, 0.2f, 10.0f, 10.0f, 10.0f);
@@ -110,13 +113,23 @@ int main(void)
     return (0);
 }
 
-void    update_physics(gfx_settings *gfx, physics_settings *phy,
+int sort_physics_collection_comp(const void *a, const void *b)
+{
+    float ca = ((physics_body*)a)->pos.y + ((physics_body*)a)->dim.y;
+    float cb = ((physics_body*)b)->pos.y + ((physics_body*)b)->dim.y;
+
+    return ((ca > cb) - (ca < cb));
+}
+
+void update_physics(gfx_settings *gfx, physics_settings *phy,
         physics_collection *c, float dt)
 {
     phy->dt_acc += dt;
 
     while (phy->dt_acc >= phy->dt)
     {
+        qsort(c->items, c->count, sizeof(*c->items),
+                sort_physics_collection_comp);
         for (size_t i = 0; i < c->count; i++)
         {
             float           acc_y = 0.0f; 
@@ -136,8 +149,9 @@ void    update_physics(gfx_settings *gfx, physics_settings *phy,
             if ((iy + ih) >= y_max)
             {
                 c->items[i].pos.y = y_max - ih;
+                c->items[i].v.y = 0.0f;
                 for (size_t j = 0; j < iw; j++)
-                    phy->col[ix + j] = y_max - ih;
+                    phy->col[ix + j] += ih;
                 settled = true;
             }
 
