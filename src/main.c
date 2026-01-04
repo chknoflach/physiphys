@@ -185,8 +185,14 @@ void update_physics(gfx_settings *gfx, ph_settings *phy,
 
     while (phy->dt_acc >= phy->dt)
     {
+        bool stepback = false;
         for (size_t i = 0; i < c->count; i++)
         {
+            if (stepback)
+            {
+                i--;
+                stepback = false;
+            }
             ph_body    *bd = &(c->items[i]);
             if (bd->settled || bd->stationary)
                 continue;
@@ -196,6 +202,7 @@ void update_physics(gfx_settings *gfx, ph_settings *phy,
                 || (bd->pos.x <= 0.0f - bd->dim.x))
             {
                 remove_from_collection(c, i);
+                stepback = true;
                 continue;
             }
 
