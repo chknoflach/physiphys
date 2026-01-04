@@ -3,6 +3,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include <float.h>
 
 #define MEM_STEP 64
 /*    Color colors[MAX_COLORS_COUNT] = {
@@ -33,11 +34,12 @@ typedef struct {
     ph_body *items;
     size_t  count;
     size_t  capacity;
+    size_t  active;
 } ph_collection;
 
 typedef struct {
-    ph_body *a;
-    ph_body *b;
+    ph_body *og;
+    ph_body *cl;
     size_t  i;
 } ph_collission;
 
@@ -100,8 +102,8 @@ int main(void)
     phys.fps = 240;
     phys.dt = 1.0f / phys.fps;
     
-    InitWindow(gfx.width, gfx.height, "raylib test");
     SetTargetFPS(gfx.fps);
+    InitWindow(gfx.width, gfx.height, "raylib test");
     _reset(&bodies, &gfx);
 
     while (!WindowShouldClose())
@@ -121,15 +123,26 @@ int main(void)
             bd.pos.y = floorf(bd.pos.y) - bd.dim.y / 2;
             bd.drag = ((float)rand() / RAND_MAX);
             check = get_collission(&bodies, &bd, 0);
-            if (check.b == 0)
+            if (check.cl == 0)
                 add_to_collection(&bodies, bd);
         }
         update_physics(&gfx, &phys, &bodies, dt);
         BeginDrawing();
         ClearBackground(BLACK);
         draw_collection(&bodies);
-        DrawText(TextFormat("FPS: %08f", 1/dt), 10, 10, 10, WHITE);
-        DrawText(TextFormat("Phys Entities: %ld", bodies.count), 10, 30, 10, WHITE);
+
+        float effps = GetFPS();
+        Color fpsc = GREEN;
+        if (effps / gfx.fps < 0.9)
+            fpsc = YELLOW;
+        if (effps / gfx.fps < 0.6)
+            fpsc = ORANGE;
+        if (effps / gfx.fps < 0.4)
+            fpsc = RED;
+        DrawText(TextFormat("FPS: %d", (int)(effps)), 10, 10, 10, fpsc);
+        DrawText(TextFormat("Phys Entities:"), 10, 30, 10, LIGHTGRAY);
+        DrawText(TextFormat("Total: %ld", bodies.count), 10, 45, 10, LIGHTGRAY);
+        DrawText(TextFormat("Active: %d", bodies.active), 10, 60, 10, LIGHTGRAY);
         EndDrawing();
     }
     CloseWindow();
@@ -138,6 +151,8 @@ int main(void)
 
 int detect_collission(ph_body *a, ph_body *b)
 {
+    if (a == b)
+        return (0);
     if (a->pos.x + a->dim.x < b->pos.x || b->pos.x + b->dim.x < a->pos.x)
         return (0);
     if (a->pos.y + a->dim.y < b->pos.y || b->pos.y + b->dim.y < a->pos.y)
@@ -185,32 +200,27 @@ void update_physics(gfx_settings *gfx, ph_settings *phy,
 
     while (phy->dt_acc >= phy->dt)
     {
-        bool stepback = false;
+        c->active = 0;
         for (size_t i = 0; i < c->count; i++)
         {
-            if (stepback)
-            {
-                i--;
-                stepback = false;
-            }
             ph_body    *bd = &(c->items[i]);
-            if (bd->settled || bd->stationary)
-                continue;
-            if (   (bd->pos.y >= (float)gfx->height && bd->v.y >= 0)
-                || (bd->pos.y <= 0.0f - bd->dim.y && bd->v.y <= 0) 
-                || (bd->pos.x >= (float)gfx->width)
-                || (bd->pos.x <= 0.0f - bd->dim.x))
+            // prune out of of bounds elements
+            while( (i < c->count) && 
+                   (   (bd->pos.y >= (float)gfx->height && bd->v.y >= 0)
+                    || (bd->pos.y <= 0.0f - bd->dim.y && bd->v.y <= 0) 
+                    || (bd->pos.x >= (float)gfx->width && bd->v.x >= 0)
+                    || (bd->pos.x <= 0.0f - bd->dim.x && bd->v.x <= 0)))
             {
                 remove_from_collection(c, i);
-                stepback = true;
-                continue;
+                bd = &(c->items[i]);
             }
-
+            // skip elements at rest
+            if (bd->settled || bd->stationary)
+                continue;
+            c->active++;
             float   acc_y = 0.0f; 
             int     ix = (int)floorf(bd->pos.x);
             int     iw = (int)ceilf(bd->dim.x);
-            bool    collided;
-            ph_body *o;
 
             if (ix < 0) {
                 iw += ix;
@@ -218,32 +228,31 @@ void update_physics(gfx_settings *gfx, ph_settings *phy,
             }
             if (iw + ix >= gfx->width) iw = gfx->width - ix;
 
-            for (size_t j = 0; j < c->count; j++)
+            // since we skip elements at rest, we need to check
+            // collissions against all elements. If we would not skip
+            // elements at rest, we could check only forward.
+            ph_collission check = get_collission(c, bd, 0);
+            if (check.cl)
             {
-                if (i == j)
-                    continue;
-                o = &(c->items[j]);
-                collided = detect_collission(bd, o);
-                if (!collided)
-                    continue;
-                if (bd->stationary || bd->settled)
+                if (check.og->stationary || check.og->settled
+                 || check.cl->stationary || check.cl->settled)
                 {
-                    o->v.y = 0.0f;
-                    o->settled = true;
+                    check.og->v.y = check.cl->v.y = 0.0f;
+                    check.og->settled = check.cl->settled = true;
                     continue;
                 }
-                if (o->stationary || o->settled)
-                {
-                    bd->v.y = 0.0f;
-                    bd->settled = true;
-                    continue;
-                }
-                bd->pos.y = o->pos.y > bd->pos.y ? o->pos.y - bd->dim.y : bd->pos.y;
-                o->pos.y  = o->pos.y < bd->pos.y ? bd->pos.y - o->dim.y : o->pos.y;
-                float v = (bd->mass * bd->v.y + o->mass * o->v.y)
-                        / (bd->mass + o->mass);
-                bd->v.y = v;
-                o->v.y = v;
+                // TODO: how/wether to handle cascading collissions due
+                // to changing position; currently, we just implicitly defer
+                // to the next physics frame
+                check.og->pos.y = check.cl->pos.y > check.og->pos.y ?
+                    check.cl->pos.y - check.og->dim.y : check.og->pos.y;
+                check.cl->pos.y  = check.cl->pos.y < check.og->pos.y ?
+                    check.og->pos.y - check.cl->dim.y : check.cl->pos.y;
+                float v = (check.og->mass * check.og->v.y
+                            + check.cl->mass * check.cl->v.y)
+                        / (check.og->mass + check.cl->mass);
+                check.og->v.y = v;
+                check.cl->v.y = v;
             }
             acc_y = (phy->g_px * bd->g_tweak) -
                 (bd->drag / bd->mass) * bd->v.y * fabsf(bd->v.y);
@@ -256,16 +265,16 @@ void update_physics(gfx_settings *gfx, ph_settings *phy,
 
 ph_collission get_collission(ph_collection *cl, ph_body *bd, size_t i)
 {
-    ph_collission coll = {0};
+    ph_collission ret = {0};
+    ret.og = bd;
  
-    while (i < cl->count && !detect_collission(bd, &cl->items[i])) i++;
+    while (i < cl->count && !detect_collission(ret.og, &cl->items[i])) i++;
     if (i < cl->count)
     {
-        coll.a = bd;
-        coll.b = &cl->items[i];
-        coll.i = i;
+        ret.cl = &cl->items[i];
+        ret.i  = i;
     }
-    return (coll);
+    return (ret);
 }
 
 void    add_to_collection(ph_collection *cl, ph_body bd)
