@@ -30,10 +30,16 @@ typedef struct {
 } ph_body;
 
 typedef struct {
-    ph_body  *items;
-    size_t   count;
-    size_t   capacity;
+    ph_body *items;
+    size_t  count;
+    size_t  capacity;
 } ph_collection;
+
+typedef struct {
+    ph_body *a;
+    ph_body *b;
+    size_t  i;
+} ph_collission;
 
 typedef struct {
     float   g;
@@ -68,14 +74,15 @@ static const ph_body DEFAULT_BODY = {
     .material.elastic = 1.0f
 };
 
-ph_body     create_ph_body(float, float, float, float, float);
-void        add_to_collection(ph_collection *, ph_body);
-void        remove_from_collection(ph_collection *, size_t);
-void        update_physics(gfx_settings *, ph_settings *, ph_collection *, float);
-int         detect_collission(ph_body *, ph_body *);
-void        draw_collection(ph_collection *);
-int         sort_ph_collection_comp(const void *, const void *);
-void        _reset(ph_collection *);
+ph_body         create_ph_body(float, float, float, float, float);
+void            add_to_collection(ph_collection *, ph_body);
+void            remove_from_collection(ph_collection *, size_t);
+void            update_physics(gfx_settings *, ph_settings *, ph_collection *, float);
+int             detect_collission(ph_body *, ph_body *);
+ph_collission   get_collission(ph_collection *, ph_body *, size_t);
+void            draw_collection(ph_collection *);
+int             sort_ph_collection_comp(const void *, const void *);
+void            _reset(ph_collection *, gfx_settings *);
 
 int main(void)
 {
@@ -95,35 +102,34 @@ int main(void)
     
     InitWindow(gfx.width, gfx.height, "raylib test");
     SetTargetFPS(gfx.fps);
-
-    ph_body ground = create_ph_body(0.0f, 0.0f, 400.0f, 20.0f, 1.0f);
-    ground.pos.x = (gfx.width - 400.0f) / 2;
-    ground.pos.y = (gfx.height - 20.0f);
-    ground.stationary = true;
-    ground.material.color = SKYBLUE;
-    add_to_collection(&bodies, ground);
+    _reset(&bodies, &gfx);
 
     while (!WindowShouldClose())
     {
         dt = GetFrameTime();
 
         if (IsKeyPressed(KEY_R))
-            _reset(&bodies);
+            _reset(&bodies, &gfx);
 
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT))
         {
-            ph_body bd = create_ph_body(2.0f, 0.2f, 10.0f, 10.0f, 10.0f);
+            float   tmp_d = 5.0f;
+            ph_collission check;
+            ph_body bd = create_ph_body(2.0f, 0.2f, tmp_d, tmp_d, tmp_d);
             bd.pos = GetMousePosition();
-            bd.pos.x = floorf(bd.pos.x);
-            bd.pos.y = floorf(bd.pos.y);
-            bd.drag = (10 * ((float)rand() / RAND_MAX));
-            add_to_collection(&bodies, bd);
+            bd.pos.x = floorf(bd.pos.x) - bd.dim.x / 2;
+            bd.pos.y = floorf(bd.pos.y) - bd.dim.y / 2;
+            bd.drag = ((float)rand() / RAND_MAX);
+            check = get_collission(&bodies, &bd, 0);
+            if (check.b == 0)
+                add_to_collection(&bodies, bd);
         }
         update_physics(&gfx, &phys, &bodies, dt);
         BeginDrawing();
         ClearBackground(BLACK);
         draw_collection(&bodies);
         DrawText(TextFormat("FPS: %08f", 1/dt), 10, 10, 10, WHITE);
+        DrawText(TextFormat("Phys Entities: %ld", bodies.count), 10, 30, 10, WHITE);
         EndDrawing();
     }
     CloseWindow();
@@ -149,12 +155,19 @@ void draw_collection(ph_collection *c)
     }
 }
 
-void _reset(ph_collection *c)
+void _reset(ph_collection *c, gfx_settings *gfx)
 {
     c->count = 0;
     c->capacity = 0;
     free(c->items); 
     c->items = NULL;
+
+    ph_body ground = create_ph_body(0.0f, 0.0f, 400.0f, 20.0f, 1.0f);
+    ground.pos.x = (gfx->width - 400.0f) / 2;
+    ground.pos.y = (gfx->height - 20.0f);
+    ground.stationary = true;
+    ground.material.color = SKYBLUE;
+    add_to_collection(c, ground);
 }
 
 int sort_ph_collection_comp(const void *a, const void *b)
@@ -172,15 +185,11 @@ void update_physics(gfx_settings *gfx, ph_settings *phy,
 
     while (phy->dt_acc >= phy->dt)
     {
-        qsort(c->items, c->count, sizeof(*c->items),
-                sort_ph_collection_comp);
         for (size_t i = 0; i < c->count; i++)
         {
             ph_body    *bd = &(c->items[i]);
-
             if (bd->settled || bd->stationary)
                 continue;
-
             if (bd->pos.y >= (float)gfx->height || bd->pos.x >= (float)gfx->width)
             {
                 remove_from_collection(c, i);
@@ -199,8 +208,6 @@ void update_physics(gfx_settings *gfx, ph_settings *phy,
 
             for (size_t j = 0; j < c->count; j++)
             {
-                if (j == i) // skip self
-                    continue;
                 o = &(c->items[j]);
                 collided = detect_collission(bd, o);
                 if (!collided)
@@ -224,21 +231,27 @@ void update_physics(gfx_settings *gfx, ph_settings *phy,
                 bd->v.y = v;
                 o->v.y = v;
             }
-            if (false) // TODO: collision
-            {
-                bd->v.y = 0.0f;
-                bd->settled = true;
-            }
-            else
-            {
-                acc_y = (phy->g_px * bd->g_tweak) -
-                    (bd->drag / bd->mass) * bd->v.y * fabsf(bd->v.y);
-                bd->v.y += acc_y * phy->dt;
-                bd->pos.y += bd->v.y * phy->dt;
-            }
+            acc_y = (phy->g_px * bd->g_tweak) -
+                (bd->drag / bd->mass) * bd->v.y * fabsf(bd->v.y);
+            bd->v.y += acc_y * phy->dt;
+            bd->pos.y += bd->v.y * phy->dt;
         }
         phy->dt_acc -= phy->dt;
     }
+}
+
+ph_collission get_collission(ph_collection *cl, ph_body *bd, size_t i)
+{
+    ph_collission coll = {0};
+ 
+    while (i < cl->count && !detect_collission(bd, &cl->items[i])) i++;
+    if (i < cl->count)
+    {
+        coll.a = bd;
+        coll.b = &cl->items[i];
+        coll.i = i;
+    }
+    return (coll);
 }
 
 void    add_to_collection(ph_collection *cl, ph_body bd)
@@ -272,4 +285,3 @@ ph_body    create_ph_body(float mass, float drag, float x, float y, float z)
     bd.dim.z = z;
     return (bd);
 }
-
