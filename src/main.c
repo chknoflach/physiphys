@@ -190,7 +190,10 @@ void update_physics(gfx_settings *gfx, ph_settings *phy,
             ph_body    *bd = &(c->items[i]);
             if (bd->settled || bd->stationary)
                 continue;
-            if (bd->pos.y >= (float)gfx->height || bd->pos.x >= (float)gfx->width)
+            if (   (bd->pos.y >= (float)gfx->height && bd->v.y >= 0)
+                || (bd->pos.y <= 0.0f - bd->dim.y && bd->v.y <= 0) 
+                || (bd->pos.x >= (float)gfx->width)
+                || (bd->pos.x <= 0.0f - bd->dim.x))
             {
                 remove_from_collection(c, i);
                 continue;
@@ -202,12 +205,16 @@ void update_physics(gfx_settings *gfx, ph_settings *phy,
             bool    collided;
             ph_body *o;
 
-            if (ix >= gfx->width || ix + iw < 0) continue;
-            if (ix < 0) ix = 0;
+            if (ix < 0) {
+                iw += ix;
+                ix = 0;
+            }
             if (iw + ix >= gfx->width) iw = gfx->width - ix;
 
             for (size_t j = 0; j < c->count; j++)
             {
+                if (i == j)
+                    continue;
                 o = &(c->items[j]);
                 collided = detect_collission(bd, o);
                 if (!collided)
