@@ -5,7 +5,8 @@
 #include <string.h>
 #include <float.h>
 
-#define MEM_STEP 64
+#define MEM_STEP            64
+#define COLLISSION_PASSES   4
 
 #define FLAG_LOG            (1u << 0)
 
@@ -30,7 +31,9 @@ typedef struct {
     float           drag;       // drag coefficient
     float           g_tweak;    // manual gravity tweak; 1.0f = normal
     Vector3         v;          // m/s
+    Vector3         v_prev;     // m/s
     Vector3         pos;        // meters
+    Vector3         pos_prev;   // prev step position
     Vector3         dim;        // dimensions as bounding box
     bool            settled;    // is this body at rest?
     bool            stationary; // marks as immovable
@@ -80,6 +83,7 @@ typedef struct {
     float           dt_phys;
     float           dt_game;
     ph_stats        stats;
+    Vector2         mouse_prev;
 } game_state;
 
 ph_body         create_ph_body(float, float, float, float, float);
@@ -89,7 +93,9 @@ void            update_inputs(game_state *);
 void            update_game(game_state *);
 void            update_physics(game_state *);
 void            update_draw(game_state *);
-ph_body         create_body_xy(Vector2, Vector3);
+ph_body         create_body_xy(Vector2, Vector3, Vector3);
+void            update_ph_body_pos(ph_body *, float, float, float);
+void            update_ph_body_v(ph_body *, float, float, float);
 void            spawn_physics_body(ph_collection *, ph_body);
 int             detect_collission(ph_body *, ph_body *);
 ph_collission   get_collission(ph_collection *, ph_body *, size_t);

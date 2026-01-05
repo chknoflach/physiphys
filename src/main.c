@@ -111,9 +111,18 @@ void    update_game(game_state *state)
             state->defer ^= DEFER_SIZE_MINUS;
         }
         if (IsMouseButtonDown(MOUSE_BUTTON_LEFT))
+        {
             spawn_physics_body(&state->c,
                     create_body_xy(GetMousePosition(), 
-                        (Vector3){state->size, state->size, state->size}));
+                        (Vector3){
+                            state->size,
+                            state->size,
+                            state->size},
+                        (Vector3){
+                            2000 * (0.5f - ((float)rand() / RAND_MAX)),
+                            2000 * (0.5f - ((float)rand() / RAND_MAX)),
+                            0}));
+        }
         state->dt_game -= 1.0 / state->ups;
     }
 }
@@ -152,14 +161,13 @@ void    draw_log(game_state *state)
     DrawText(TextFormat("%ld", state->stats.collissions), 70, 90, 10, LIGHTGRAY);
 }
 
-ph_body create_body_xy(Vector2 pos, Vector3 dim)
+ph_body create_body_xy(Vector2 pos, Vector3 dim, Vector3 v)
 {
     ph_body bd;
 
-    bd = create_ph_body(2.0f, 0.2f, dim.x, dim.y, dim.z);
-    bd.pos.x = pos.x - bd.dim.x / 2;
-    bd.pos.y = pos.y - bd.dim.y / 2;
-    bd.drag = ((float)rand() / RAND_MAX);
+    bd = create_ph_body(2.0f, ((float)rand() / RAND_MAX), dim.x, dim.y, dim.z);
+    update_ph_body_pos(&bd, pos.x - bd.dim.x / 2, pos.y - bd.dim.y / 2, 0);
+    update_ph_body_v(&bd, v.x, v.y, v.z);
     return (bd);
 }
 
@@ -176,9 +184,9 @@ int detect_collission(ph_body *a, ph_body *b)
 {
     if (a == b)
         return (0);
-    if (a->pos.x + a->dim.x < b->pos.x || b->pos.x + b->dim.x < a->pos.x)
+    if (a->pos.x + a->dim.x <= b->pos.x || b->pos.x + b->dim.x <= a->pos.x)
         return (0);
-    if (a->pos.y + a->dim.y < b->pos.y || b->pos.y + b->dim.y < a->pos.y)
+    if (a->pos.y + a->dim.y <= b->pos.y || b->pos.y + b->dim.y <= a->pos.y)
         return (0);
     return (1);
 }
@@ -230,8 +238,7 @@ void update_physics(game_state *state)
         while (i < state->c.count)
         {
             bd = &(state->c.items[i]);
-            
-            // prune elements out of bounds that aren't moving towards bounds
+
             if (   (bd->pos.y >= (float)state->gfx.height && bd->v.y >= 0)
                 || (bd->pos.y <= 0.0f - bd->dim.y && bd->v.y <= 0) 
                 || (bd->pos.x >= (float)state->gfx.width && bd->v.x >= 0)
@@ -243,11 +250,12 @@ void update_physics(game_state *state)
             }
             i++;
 
-            // skip elements at rest
             if (bd->settled || bd->stationary)
                 continue;
+
             state->stats.active++;
-            float   acc_y = 0.0f; 
+
+            Vector2 acc = {0}; 
             int     ix = (int)floorf(bd->pos.x);
             int     iw = (int)ceilf(bd->dim.x);
 
@@ -258,19 +266,52 @@ void update_physics(game_state *state)
             if (iw + ix >= state->gfx.width)
                 iw = state->gfx.width - ix;
 
-            if (resolve_collission(get_collission(&state->c, bd, 0)))
+            for (int k = 0; k < COLLISSION_PASSES; k++)
+            {
+                if (!resolve_collission(get_collission(&state->c, bd, 0)))
+                    break;
                 state->stats.collissions++;
+                if (bd->stationary || bd->settled)
+                    break;
+            }
 
             if (bd->stationary || bd->settled)
                 continue;
 
-            acc_y = (state->ph.g_px * bd->g_tweak) -
+            acc.y = (state->ph.g_px * bd->g_tweak) -
                 (bd->drag / bd->mass) * bd->v.y * fabsf(bd->v.y);
-            bd->v.y += acc_y * 1.0f / state->ph.fps;
-            bd->pos.y += bd->v.y * 1.0f / state->ph.fps;
+            
+            acc.x = 0.0f -
+                (bd->drag / bd->mass) * bd->v.x * fabsf(bd->v.x);
+            
+            update_ph_body_v(bd,
+                bd->v.x + acc.x * 1.0f / state->ph.fps,
+                bd->v.y + acc.y * 1.0f / state->ph.fps,
+                bd->v.z);
+            
+            update_ph_body_pos(bd,
+                bd->pos.x + bd->v.x * 1.0f / state->ph.fps,
+                bd->pos.y + bd->v.y * 1.0f / state->ph.fps,
+                bd->pos.z);
         }
         state->dt_phys -= 1.0 / state->ph.fps;
     }
+}
+
+void    update_ph_body_v(ph_body *bd, float x, float y, float z)
+{
+    bd->v_prev = bd->v;
+    bd->v.x = x;
+    bd->v.y = y;
+    bd->v.z = z;
+}
+
+void    update_ph_body_pos(ph_body *bd, float x, float y, float z)
+{
+    bd->pos_prev = bd->pos;
+    bd->pos.x = x;
+    bd->pos.y = y;
+    bd->pos.z = z;
 }
 
 bool    resolve_collission(ph_collission clash)
@@ -296,21 +337,113 @@ bool    resolve_collission(ph_collission clash)
     }
     if (st)
     {
-        b->pos.y = a->pos.y
-            - (b->dim.y * (b->v.y > 0))
-            + (a->dim.y * (b->v.y < 0));
-        b->v.y = 0.0f;
+        if (b->pos_prev.y + b->dim.y <= a->pos.y)
+            update_ph_body_pos(b, b->pos.x, a->pos.y - b->dim.y, b->pos.z);
+        else if (b->pos_prev.y >= a->pos.y + a->dim.y)
+            update_ph_body_pos(b, b->pos.x, a->pos.y + a->dim.y, b->pos.z);
+        update_ph_body_v(b, b->v.x, 0.0f, b->v.z);
         b->settled = true;
     }
     if (!st)
     {
-        if (a->pos.y < b->pos.y)
-            a->pos.y = b->pos.y - a->dim.y;
-        if (a->pos.y > b->pos.y)
-            b->pos.y = a->pos.y - b->dim.y;
-        a->v.y = b->v.y =
-            (a->mass * a->v.y + b->mass * b->v.y) / (a->mass + b->mass);
+        // overlaps (AABB)
+        float overlap_x =
+            fminf(a->pos.x + a->dim.x, b->pos.x + b->dim.x)
+          - fmaxf(a->pos.x, b->pos.x);
+    
+        float overlap_y =
+            fminf(a->pos.y + a->dim.y, b->pos.y + b->dim.y)
+          - fmaxf(a->pos.y, b->pos.y);
+    
+        // inverse masses (no stationary bodies here, so both > 0)
+        float invA = 1.0f / a->mass;
+        float invB = 1.0f / b->mass;
+        float invSum = invA + invB;
+    
+        // small slop to avoid jitter from tiny overlaps
+        const float slop = 0.001f;
+    
+        if (overlap_x < overlap_y)
+        {
+            // normal points from a -> b on X
+            float nx = (a->pos.x + a->dim.x * 0.5f < b->pos.x + b->dim.x * 0.5f) ? -1.0f : 1.0f;
+    
+            // positional correction (split by inverse mass)
+            float pen = overlap_x - slop;
+            if (pen > 0.0f)
+            {
+                float corrA = pen * (invA / invSum);
+                float corrB = pen * (invB / invSum);
+                a->pos.x += nx * corrA;
+                b->pos.x -= nx * corrB;
+            }
+    
+            // impulse along X (e = 0, no friction)
+            float rv = b->v.x - a->v.x;     // relative velocity along +X
+            float vn = rv * (-nx);          // relative velocity along normal (a->b)
+            if (vn < 0.0f)                  // only if closing
+            {
+                float j = -vn / invSum;     // e=0
+                a->v.x -= (-nx) * (j * invA);
+                b->v.x += (-nx) * (j * invB);
+            }
+        }
+        else
+        {
+            // normal points from a -> b on Y
+            float ny = (a->pos.y + a->dim.y * 0.5f < b->pos.y + b->dim.y * 0.5f) ? -1.0f : 1.0f;
+    
+            // positional correction (split by inverse mass)
+            float pen = overlap_y - slop;
+            if (pen > 0.0f)
+            {
+                float corrA = pen * (invA / invSum);
+                float corrB = pen * (invB / invSum);
+                a->pos.y += ny * corrA;
+                b->pos.y -= ny * corrB;
+            }
+    
+            // impulse along Y (e = 0, no friction)
+            float rv = b->v.y - a->v.y;
+            float vn = rv * (-ny);
+            if (vn < 0.0f)
+            {
+                float j = -vn / invSum;     // e=0
+                a->v.y -= (-ny) * (j * invA);
+                b->v.y += (-ny) * (j * invB);
+            }
+        }
     }
+    /* mine
+    if (!st)
+    {
+        float overlap_x = fminf(a->pos.x + a->dim.x, b->pos.x + b->dim.x)
+                        - fmaxf(a->pos.x, b->pos.x);
+        float overlap_y = fminf(a->pos.y + a->dim.y, b->pos.y + b->dim.y)
+                        - fmaxf(a->pos.y, b->pos.y);
+    
+        if (overlap_x < overlap_y)
+        {
+            if (a->pos.x < b->pos.x)
+                a->pos.x = b->pos.x - a->dim.x;
+            else
+                b->pos.x = a->pos.x - b->dim.x;
+    
+            a->v.x = b->v.x =
+                (a->mass * a->v.x + b->mass * b->v.x) / (a->mass + b->mass);
+        }
+        else
+        {
+            if (a->pos.y < b->pos.y)
+                a->pos.y = b->pos.y - a->dim.y;
+            else
+                b->pos.y = a->pos.y - b->dim.y;
+    
+            a->v.y = b->v.y =
+                (a->mass * a->v.y + b->mass * b->v.y) / (a->mass + b->mass);
+        }
+    }
+    */
     return (true);
 }
 
