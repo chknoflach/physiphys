@@ -344,9 +344,9 @@ bool    resolve_collission(ph_collission clash)
         update_ph_body_v(b, b->v.x, 0.0f, b->v.z);
         b->settled = true;
     }
+    // next whole if-scope is GPT, the math deep dive is not for me
     if (!st)
     {
-        // overlaps (AABB)
         float overlap_x =
             fminf(a->pos.x + a->dim.x, b->pos.x + b->dim.x)
           - fmaxf(a->pos.x, b->pos.x);
@@ -355,95 +355,51 @@ bool    resolve_collission(ph_collission clash)
             fminf(a->pos.y + a->dim.y, b->pos.y + b->dim.y)
           - fmaxf(a->pos.y, b->pos.y);
     
-        // inverse masses (no stationary bodies here, so both > 0)
         float invA = 1.0f / a->mass;
         float invB = 1.0f / b->mass;
         float invSum = invA + invB;
     
-        // small slop to avoid jitter from tiny overlaps
         const float slop = 0.001f;
     
-        if (overlap_x < overlap_y)
-        {
-            // normal points from a -> b on X
-            float nx = (a->pos.x + a->dim.x * 0.5f < b->pos.x + b->dim.x * 0.5f) ? -1.0f : 1.0f;
-    
-            // positional correction (split by inverse mass)
-            float pen = overlap_x - slop;
-            if (pen > 0.0f)
-            {
-                float corrA = pen * (invA / invSum);
-                float corrB = pen * (invB / invSum);
-                a->pos.x += nx * corrA;
-                b->pos.x -= nx * corrB;
-            }
-    
-            // impulse along X (e = 0, no friction)
-            float rv = b->v.x - a->v.x;     // relative velocity along +X
-            float vn = rv * (-nx);          // relative velocity along normal (a->b)
-            if (vn < 0.0f)                  // only if closing
-            {
-                float j = -vn / invSum;     // e=0
-                a->v.x -= (-nx) * (j * invA);
-                b->v.x += (-nx) * (j * invB);
-            }
-        }
-        else
-        {
-            // normal points from a -> b on Y
-            float ny = (a->pos.y + a->dim.y * 0.5f < b->pos.y + b->dim.y * 0.5f) ? -1.0f : 1.0f;
-    
-            // positional correction (split by inverse mass)
-            float pen = overlap_y - slop;
-            if (pen > 0.0f)
-            {
-                float corrA = pen * (invA / invSum);
-                float corrB = pen * (invB / invSum);
-                a->pos.y += ny * corrA;
-                b->pos.y -= ny * corrB;
-            }
-    
-            // impulse along Y (e = 0, no friction)
-            float rv = b->v.y - a->v.y;
-            float vn = rv * (-ny);
-            if (vn < 0.0f)
-            {
-                float j = -vn / invSum;     // e=0
-                a->v.y -= (-ny) * (j * invA);
-                b->v.y += (-ny) * (j * invB);
-            }
-        }
-    }
-    /* mine
-    if (!st)
-    {
-        float overlap_x = fminf(a->pos.x + a->dim.x, b->pos.x + b->dim.x)
-                        - fmaxf(a->pos.x, b->pos.x);
-        float overlap_y = fminf(a->pos.y + a->dim.y, b->pos.y + b->dim.y)
-                        - fmaxf(a->pos.y, b->pos.y);
+        Vector2 n = {0};
+        float   pen;
     
         if (overlap_x < overlap_y)
         {
-            if (a->pos.x < b->pos.x)
-                a->pos.x = b->pos.x - a->dim.x;
-            else
-                b->pos.x = a->pos.x - b->dim.x;
-    
-            a->v.x = b->v.x =
-                (a->mass * a->v.x + b->mass * b->v.x) / (a->mass + b->mass);
+            n.x = (a->pos.x + a->dim.x * 0.5f < b->pos.x + b->dim.x * 0.5f) ? -1.0f : 1.0f;
+            pen = overlap_x - slop;
         }
         else
         {
-            if (a->pos.y < b->pos.y)
-                a->pos.y = b->pos.y - a->dim.y;
-            else
-                b->pos.y = a->pos.y - b->dim.y;
+            n.y = (a->pos.y + a->dim.y * 0.5f < b->pos.y + b->dim.y * 0.5f) ? -1.0f : 1.0f;
+            pen = overlap_y - slop;
+        }
     
-            a->v.y = b->v.y =
-                (a->mass * a->v.y + b->mass * b->v.y) / (a->mass + b->mass);
+        // positional correction (split by inverse mass)
+        if (pen > 0.0f)
+        {
+            float corrA = pen * (invA / invSum);
+            float corrB = pen * (invB / invSum);
+            a->pos.x += n.x * corrA;
+            a->pos.y += n.y * corrA;
+            b->pos.x -= n.x * corrB;
+            b->pos.y -= n.y * corrB;
+        }
+    
+        // impulse along normal (e = 0, no friction)
+        float rvx = b->v.x - a->v.x;
+        float rvy = b->v.y - a->v.y;
+        float vn  = rvx * (-n.x) + rvy * (-n.y);   // relative speed into the normal
+    
+        if (vn < 0.0f)
+        {
+            float j = -vn / invSum;                // e=0
+            a->v.x -= (-n.x) * (j * invA);
+            a->v.y -= (-n.y) * (j * invA);
+            b->v.x += (-n.x) * (j * invB);
+            b->v.y += (-n.y) * (j * invB);
         }
     }
-    */
     return (true);
 }
 
