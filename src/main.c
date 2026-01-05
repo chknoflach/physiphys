@@ -6,6 +6,13 @@
 #include <float.h>
 
 #define MEM_STEP 64
+
+#define FLAG_LOG            (1u << 0)
+
+#define DEFER_RESET         (1u << 0)
+#define DEFER_SIZE_PLUS     (1u << 1)
+#define DEFER_SIZE_MINUS    (1u << 2)
+
 /*    Color colors[MAX_COLORS_COUNT] = {
         DARKGRAY, MAROON, ORANGE, DARKGREEN, DARKBLUE, DARKPURPLE, DARKBROWN,
         GRAY, RED, GOLD, LIME, BLUE, VIOLET, BROWN, LIGHTGRAY, PINK, YELLOW,
@@ -22,8 +29,8 @@ typedef struct {
     float           mass;       // mass in kg
     float           drag;       // drag coefficient
     float           g_tweak;    // manual gravity tweak; 1.0f = normal
-    Vector2         v;          // m/s
-    Vector2         pos;        // meters
+    Vector3         v;          // m/s
+    Vector3         pos;        // meters
     Vector3         dim;        // dimensions as bounding box
     bool            settled;    // is this body at rest?
     bool            stationary; // marks as immovable
@@ -47,8 +54,6 @@ typedef struct {
     float   g;
     size_t  g_px;
     size_t  fps;
-    float   dt;
-    float   dt_acc;
 } ph_settings;
 
 typedef struct {
@@ -56,6 +61,20 @@ typedef struct {
     int     height;
     int     fps;
 } gfx_settings;
+
+typedef struct {
+    gfx_settings    gfx;
+    ph_settings     ph;
+    ph_collection   c;
+    size_t          flags;
+    size_t          defer;
+    float           size;
+    float           dt;
+    float           ups;
+    float           dt_draw;
+    float           dt_phys;
+    float           dt_game;
+} game_state;
 
 static const ph_body DEFAULT_BODY = {
     .mass = 1.0f,
@@ -79,74 +98,138 @@ static const ph_body DEFAULT_BODY = {
 ph_body         create_ph_body(float, float, float, float, float);
 void            add_to_collection(ph_collection *, ph_body);
 void            remove_from_collection(ph_collection *, size_t);
-void            update_physics(gfx_settings *, ph_settings *, ph_collection *, float);
+void            update_inputs(game_state *);
+void            update_game(game_state *);
+void            update_physics(game_state *);
+void            update_draw(game_state *);
+ph_body         create_body_xy(Vector2, Vector3);
+void            spawn_physics_body(ph_collection *, ph_body);
 int             detect_collission(ph_body *, ph_body *);
 ph_collission   get_collission(ph_collection *, ph_body *, size_t);
 void            draw_collection(ph_collection *);
+void            draw_log(game_state *);
 int             sort_ph_collection_comp(const void *, const void *);
-void            _reset(ph_collection *, gfx_settings *);
+void            _reset(game_state *);
 
 int main(void)
 {
-    gfx_settings gfx = {0};
-    ph_settings phys = {0};
-    ph_collection bodies = {0};
-    float dt;
-    
-    gfx.width = 800;
-    gfx.height = 600;
-    gfx.fps = 720;
+    game_state  state = {0};
 
-    phys.g = 9.81f;
-    phys.g_px = phys.g * 200.0f;
-    phys.fps = 240;
-    phys.dt = 1.0f / phys.fps;
+    state.ups = 720;
+    state.size = 5;
     
-    SetTargetFPS(gfx.fps);
-    InitWindow(gfx.width, gfx.height, "raylib test");
-    _reset(&bodies, &gfx);
+    state.gfx.width = 800;
+    state.gfx.height = 600;
+    state.gfx.fps = 60;
+
+    state.ph.g = 9.81f;
+    state.ph.g_px = state.ph.g * 200.0f;
+    state.ph.fps = 240;
+
+    state.flags |= FLAG_LOG;
+    
+    InitWindow(state.gfx.width, state.gfx.height, "raylib test");
+    _reset(&state);
 
     while (!WindowShouldClose())
     {
-        dt = GetFrameTime();
-
-        if (IsKeyPressed(KEY_R))
-            _reset(&bodies, &gfx);
-
-        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT))
-        {
-            float   tmp_d = 5.0f;
-            ph_collission check;
-            ph_body bd = create_ph_body(2.0f, 0.2f, tmp_d, tmp_d, tmp_d);
-            bd.pos = GetMousePosition();
-            bd.pos.x = floorf(bd.pos.x) - bd.dim.x / 2;
-            bd.pos.y = floorf(bd.pos.y) - bd.dim.y / 2;
-            bd.drag = ((float)rand() / RAND_MAX);
-            check = get_collission(&bodies, &bd, 0);
-            if (check.cl == 0)
-                add_to_collection(&bodies, bd);
-        }
-        update_physics(&gfx, &phys, &bodies, dt);
+        state.dt = GetFrameTime();
+        update_inputs(&state);
+        update_game(&state);
+        update_physics(&state);
         BeginDrawing();
-        ClearBackground(BLACK);
-        draw_collection(&bodies);
-
-        float effps = GetFPS();
-        Color fpsc = GREEN;
-        if (effps / gfx.fps < 0.9)
-            fpsc = YELLOW;
-        if (effps / gfx.fps < 0.6)
-            fpsc = ORANGE;
-        if (effps / gfx.fps < 0.4)
-            fpsc = RED;
-        DrawText(TextFormat("FPS: %d", (int)(effps)), 10, 10, 10, fpsc);
-        DrawText(TextFormat("Phys Entities:"), 10, 30, 10, LIGHTGRAY);
-        DrawText(TextFormat("Total: %ld", bodies.count), 10, 45, 10, LIGHTGRAY);
-        DrawText(TextFormat("Active: %d", bodies.active), 10, 60, 10, LIGHTGRAY);
+        update_draw(&state);
         EndDrawing();
     }
     CloseWindow();
     return (0);
+}
+
+void    update_inputs(game_state *state)
+{
+    if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_R))
+        state->defer |= DEFER_RESET;
+    if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_L))
+        state->flags = state->flags ^ FLAG_LOG;
+    if (IsKeyDown(KEY_UP))
+        state->defer |= DEFER_SIZE_PLUS;
+    if (IsKeyDown(KEY_DOWN) && state->size >= 0.01f)
+        state->defer |= DEFER_SIZE_MINUS;
+}
+
+void    update_game(game_state *state)
+{
+    state->dt_game += state->dt;
+    if (state->dt_game >= 1.0 / state->ups) {
+        if (state->defer & DEFER_RESET)
+        {
+            _reset(state);
+            state->defer ^= DEFER_RESET;
+        }
+        if (state->defer & DEFER_SIZE_PLUS)
+        {
+            state->size += 0.01f;
+            state->defer ^= DEFER_SIZE_PLUS;
+        }
+        if (state->defer & DEFER_SIZE_MINUS)
+        {
+            state->size -= 0.01f;
+            state->defer ^= DEFER_SIZE_MINUS;
+        }
+        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT))
+            spawn_physics_body(&state->c,
+                    create_body_xy(GetMousePosition(), 
+                        (Vector3){state->size, state->size, state->size}));
+        state->dt_game -= 1.0 / state->ups;
+    }
+}
+
+void    update_draw(game_state *state)
+{
+    state->dt_draw += state->dt;
+    if (state->dt_draw >= 1.0 / state->gfx.fps) {
+        ClearBackground(BLACK);
+        draw_collection(&state->c);
+        if (state->flags & FLAG_LOG)
+            draw_log(state);
+        state->dt_draw = 0;
+    }
+}
+
+void    draw_log(game_state *state)
+{
+    float effps = GetFPS();
+    Color fpsc = GREEN;
+    if (effps / state->gfx.fps < 0.9)
+        fpsc = YELLOW;
+    if (effps / state->gfx.fps < 0.6)
+        fpsc = ORANGE;
+    if (effps / state->gfx.fps < 0.4)
+        fpsc = RED;
+    DrawText(TextFormat("FPS: %d", (int)(effps)), 10, 10, 10, fpsc);
+    DrawText(TextFormat("Phys Entities:"), 10, 30, 10, LIGHTGRAY);
+    DrawText(TextFormat("Total: %ld", state->c.count), 10, 45, 10, LIGHTGRAY);
+    DrawText(TextFormat("Active: %d", state->c.active), 10, 60, 10, LIGHTGRAY);
+}
+
+ph_body create_body_xy(Vector2 pos, Vector3 dim)
+{
+    ph_body bd;
+
+    bd = create_ph_body(2.0f, 0.2f, dim.x, dim.y, dim.z);
+    bd.pos.x = pos.x - bd.dim.x / 2;
+    bd.pos.y = pos.y - bd.dim.y / 2;
+    bd.drag = ((float)rand() / RAND_MAX);
+    return (bd);
+}
+
+void spawn_physics_body(ph_collection *c, ph_body bd)
+{
+    ph_collission   check;
+
+    check = get_collission(c, &bd, 0);
+    if (check.cl == 0)
+        add_to_collection(c, bd);
 }
 
 int detect_collission(ph_body *a, ph_body *b)
@@ -170,19 +253,19 @@ void draw_collection(ph_collection *c)
     }
 }
 
-void _reset(ph_collection *c, gfx_settings *gfx)
+void _reset(game_state *state)
 {
-    c->count = 0;
-    c->capacity = 0;
-    free(c->items); 
-    c->items = NULL;
+    state->c.count = 0;
+    state->c.capacity = 0;
+    free(state->c.items); 
+    state->c.items = NULL;
 
     ph_body ground = create_ph_body(0.0f, 0.0f, 400.0f, 20.0f, 1.0f);
-    ground.pos.x = (gfx->width - 400.0f) / 2;
-    ground.pos.y = (gfx->height - 20.0f);
+    ground.pos.x = (state->gfx.width - 400.0f) / 2;
+    ground.pos.y = (state->gfx.height - 20.0f);
     ground.stationary = true;
     ground.material.color = SKYBLUE;
-    add_to_collection(c, ground);
+    add_to_collection(&state->c, ground);
 }
 
 int sort_ph_collection_comp(const void *a, const void *b)
@@ -193,31 +276,37 @@ int sort_ph_collection_comp(const void *a, const void *b)
     return ((ca > cb) - (ca < cb));
 }
 
-void update_physics(gfx_settings *gfx, ph_settings *phy,
-        ph_collection *c, float dt)
+void update_physics(game_state *state)
 {
-    phy->dt_acc += dt;
+    ph_body *bd;
+    int     max_steps = 1024;
+    size_t  i;
 
-    while (phy->dt_acc >= phy->dt)
+    state->dt_phys += state->dt;
+    while (max_steps-- && (state->dt_phys >= 1.0f / state->ph.fps))
     {
-        c->active = 0;
-        for (size_t i = 0; i < c->count; i++)
+        i = 0;
+        state->c.active = 0;
+        while (i < state->c.count)
         {
-            ph_body    *bd = &(c->items[i]);
-            // prune out of of bounds elements
-            while( (i < c->count) && 
-                   (   (bd->pos.y >= (float)gfx->height && bd->v.y >= 0)
-                    || (bd->pos.y <= 0.0f - bd->dim.y && bd->v.y <= 0) 
-                    || (bd->pos.x >= (float)gfx->width && bd->v.x >= 0)
-                    || (bd->pos.x <= 0.0f - bd->dim.x && bd->v.x <= 0)))
+            bd = &(state->c.items[i]);
+            
+            // prune elements out of bounds that aren't moving towards bounds
+            if (   (bd->pos.y >= (float)state->gfx.height && bd->v.y >= 0)
+                || (bd->pos.y <= 0.0f - bd->dim.y && bd->v.y <= 0) 
+                || (bd->pos.x >= (float)state->gfx.width && bd->v.x >= 0)
+                || (bd->pos.x <= 0.0f - bd->dim.x && bd->v.x <= 0))
             {
-                remove_from_collection(c, i);
-                bd = &(c->items[i]);
+                TraceLog(LOG_INFO, "it's gone");
+                remove_from_collection(&state->c, i);
+                continue;
             }
+            i++;
+
             // skip elements at rest
             if (bd->settled || bd->stationary)
                 continue;
-            c->active++;
+            state->c.active++;
             float   acc_y = 0.0f; 
             int     ix = (int)floorf(bd->pos.x);
             int     iw = (int)ceilf(bd->dim.x);
@@ -226,12 +315,12 @@ void update_physics(gfx_settings *gfx, ph_settings *phy,
                 iw += ix;
                 ix = 0;
             }
-            if (iw + ix >= gfx->width) iw = gfx->width - ix;
+            if (iw + ix >= state->gfx.width) iw = state->gfx.width - ix;
 
             // since we skip elements at rest, we need to check
             // collissions against all elements. If we would not skip
             // elements at rest, we could check only forward.
-            ph_collission check = get_collission(c, bd, 0);
+            ph_collission check = get_collission(&state->c, bd, 0);
             if (check.cl)
             {
                 if (check.og->stationary || check.og->settled
@@ -254,12 +343,12 @@ void update_physics(gfx_settings *gfx, ph_settings *phy,
                 check.og->v.y = v;
                 check.cl->v.y = v;
             }
-            acc_y = (phy->g_px * bd->g_tweak) -
+            acc_y = (state->ph.g_px * bd->g_tweak) -
                 (bd->drag / bd->mass) * bd->v.y * fabsf(bd->v.y);
-            bd->v.y += acc_y * phy->dt;
-            bd->pos.y += bd->v.y * phy->dt;
+            bd->v.y += acc_y * 1.0f / state->ph.fps;
+            bd->pos.y += bd->v.y * 1.0f / state->ph.fps;
         }
-        phy->dt_acc -= phy->dt;
+        state->dt_phys -= 1.0 / state->ph.fps;
     }
 }
 
@@ -279,10 +368,13 @@ ph_collission get_collission(ph_collection *cl, ph_body *bd, size_t i)
 
 void    add_to_collection(ph_collection *cl, ph_body bd)
 {
-    if (!cl->capacity || cl->count >= cl->capacity)
+    if (cl->count >= cl->capacity)
     {
-        cl->items = realloc(cl->items, sizeof(bd) * (cl->capacity + MEM_STEP));
-        cl->capacity += MEM_STEP;
+        if (cl->capacity < MEM_STEP)
+            cl->capacity = MEM_STEP;
+        else
+            cl->capacity *= 2;
+        cl->items = realloc(cl->items, sizeof(bd) * cl->capacity);
     }
     cl->items[cl->count] = bd;
     cl->count++;
@@ -290,10 +382,17 @@ void    add_to_collection(ph_collection *cl, ph_body bd)
 
 void    remove_from_collection(ph_collection *cl, size_t index)
 {
-    cl->count--;
+    if (index >= cl->count)
+        return ;
 
-    for (size_t i = index; i < cl->count; i++)
-        cl->items[i] = cl->items[i + 1];
+    cl->count--;
+    if (index < cl->count)
+    {
+        // O(1) and preserves order
+        memmove(&cl->items[index],
+                &cl->items[index + 1],
+                (cl->count - index) * sizeof(*cl->items));
+    }
 }
 
 ph_body    create_ph_body(float mass, float drag, float x, float y, float z)
