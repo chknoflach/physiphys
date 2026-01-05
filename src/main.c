@@ -275,41 +275,42 @@ void update_physics(game_state *state)
 
 bool    resolve_collission(ph_collission clash)
 {
+    ph_body *a = clash.og;
+    ph_body *b = clash.cl;
+    bool    st = false;
+
     if (!clash.cl)
         return (false);
 
-    ph_body *st = NULL;
-    ph_body *mv = NULL;
-
-    if (clash.og->v.y == 0 && (clash.og->stationary || clash.og->settled))
+    if (clash.og->stationary || clash.og->settled)
     {
-        st = clash.og;
-        mv = clash.cl;
+        a = clash.og;
+        b = clash.cl;
+        st = true;
     }
-    if (clash.cl->v.y == 0 && (clash.cl->stationary || clash.cl->settled))
+    if (clash.cl->stationary || clash.cl->settled)
     {
-        st = clash.cl;
-        mv = clash.og;
+        a = clash.cl;
+        b = clash.og;
+        st = true;
     }
     if (st)
     {
-        mv->pos.y = st->pos.y
-            - (mv->dim.y * (mv->v.y > 0))
-            + (st->dim.y * (mv->v.y < 0));
-        mv->v.y = 0.0f;
-        mv->settled = true;
-        return (true);
+        b->pos.y = a->pos.y
+            - (b->dim.y * (b->v.y > 0))
+            + (a->dim.y * (b->v.y < 0));
+        b->v.y = 0.0f;
+        b->settled = true;
     }
-
-    clash.og->pos.y = clash.cl->pos.y > clash.og->pos.y ?
-        clash.cl->pos.y - clash.og->dim.y : clash.og->pos.y;
-    clash.cl->pos.y  = clash.cl->pos.y < clash.og->pos.y ?
-        clash.og->pos.y - clash.cl->dim.y : clash.cl->pos.y;
-    float v = (clash.og->mass * clash.og->v.y
-                + clash.cl->mass * clash.cl->v.y)
-            / (clash.og->mass + clash.cl->mass);
-    clash.og->v.y = v;
-    clash.cl->v.y = v;
+    if (!st)
+    {
+        if (a->pos.y < b->pos.y)
+            a->pos.y = b->pos.y - a->dim.y;
+        if (a->pos.y > b->pos.y)
+            b->pos.y = a->pos.y - b->dim.y;
+        a->v.y = b->v.y =
+            (a->mass * a->v.y + b->mass * b->v.y) / (a->mass + b->mass);
+    }
     return (true);
 }
 
