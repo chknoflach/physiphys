@@ -1,5 +1,22 @@
 #include "physiphys.h"
 
+/*
+ * Next Steps:
+ *
+ * - Positioning & size relative to window dimensions
+ * - World Boundaries instead of Window (incl. coordinate system)
+ * - Stability & falling
+ * - x-velocity
+ * - material bouncy-ness
+ * - drag rework: air drag vs. surface-friction
+ * - object rotation
+ * - collission grid // multithreading
+ * - stationary element placement
+ * - 4-directional element resizing
+ * - element preview
+ * - different shapes (circle, triangle)
+ */
+
 static const ph_body DEFAULT_BODY = {
     .mass = 1.0f,
     .drag = 0.2f,
@@ -35,7 +52,8 @@ int main(void)
     state.ph.fps = 240;
 
     state.flags |= FLAG_LOG;
-    
+
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(state.gfx.width, state.gfx.height, "raylib test");
     _reset(&state);
 
@@ -63,6 +81,11 @@ void    update_inputs(game_state *state)
         state->defer |= DEFER_SIZE_PLUS;
     if (IsKeyDown(KEY_DOWN) && state->size >= 0.01f)
         state->defer |= DEFER_SIZE_MINUS;
+    if (IsWindowResized())
+    {
+        state->gfx.width = GetScreenWidth();
+        state->gfx.height = GetScreenHeight();
+    }
 }
 
 void    update_game(game_state *state)
@@ -223,34 +246,14 @@ void update_physics(game_state *state)
                 iw += ix;
                 ix = 0;
             }
-            if (iw + ix >= state->gfx.width) iw = state->gfx.width - ix;
+            if (iw + ix >= state->gfx.width)
+                iw = state->gfx.width - ix;
 
-            // since we skip elements at rest, we need to check
-            // collissions against all elements. If we would not skip
-            // elements at rest, we could check only forward.
-            ph_collission check = get_collission(&state->c, bd, 0);
-            if (check.cl)
-            {
-                if (check.og->stationary || check.og->settled
-                 || check.cl->stationary || check.cl->settled)
-                {
-                    check.og->v.y = check.cl->v.y = 0.0f;
-                    check.og->settled = check.cl->settled = true;
-                    continue;
-                }
-                // TODO: how/wether to handle cascading collissions due
-                // to changing position; currently, we just implicitly defer
-                // to the next physics frame
-                check.og->pos.y = check.cl->pos.y > check.og->pos.y ?
-                    check.cl->pos.y - check.og->dim.y : check.og->pos.y;
-                check.cl->pos.y  = check.cl->pos.y < check.og->pos.y ?
-                    check.og->pos.y - check.cl->dim.y : check.cl->pos.y;
-                float v = (check.og->mass * check.og->v.y
-                            + check.cl->mass * check.cl->v.y)
-                        / (check.og->mass + check.cl->mass);
-                check.og->v.y = v;
-                check.cl->v.y = v;
-            }
+            resolve_collission(get_collission(&state->c, bd, 0));
+
+            if (bd->stationary || bd->settled)
+                continue;
+
             acc_y = (state->ph.g_px * bd->g_tweak) -
                 (bd->drag / bd->mass) * bd->v.y * fabsf(bd->v.y);
             bd->v.y += acc_y * 1.0f / state->ph.fps;
@@ -260,46 +263,72 @@ void update_physics(game_state *state)
     }
 }
 
-ph_collission get_collission(ph_collection *cl, ph_body *bd, size_t i)
+void    resolve_collission(ph_collission clash)
+{
+    if (clash.cl)
+    {
+        if (clash.og->stationary || clash.og->settled
+         || clash.cl->stationary || clash.cl->settled)
+        {
+            clash.og->v.y = clash.cl->v.y = 0.0f;
+            clash.og->settled = clash.cl->settled = true;
+            return;
+        }
+        // TODO: how/wether to handle cascading collissions due
+        // to changing position; currently, we just implicitly defer
+        // to the next physics frame
+        clash.og->pos.y = clash.cl->pos.y > clash.og->pos.y ?
+            clash.cl->pos.y - clash.og->dim.y : clash.og->pos.y;
+        clash.cl->pos.y  = clash.cl->pos.y < clash.og->pos.y ?
+            clash.og->pos.y - clash.cl->dim.y : clash.cl->pos.y;
+        float v = (clash.og->mass * clash.og->v.y
+                    + clash.cl->mass * clash.cl->v.y)
+                / (clash.og->mass + clash.cl->mass);
+        clash.og->v.y = v;
+        clash.cl->v.y = v;
+    }
+}
+
+ph_collission get_collission(ph_collection *c, ph_body *bd, size_t i)
 {
     ph_collission ret = {0};
     ret.og = bd;
  
-    while (i < cl->count && !detect_collission(ret.og, &cl->items[i])) i++;
-    if (i < cl->count)
+    while (i < c->count && !detect_collission(ret.og, &c->items[i])) i++;
+    if (i < c->count)
     {
-        ret.cl = &cl->items[i];
+        ret.cl = &c->items[i];
         ret.i  = i;
     }
     return (ret);
 }
 
-void    add_to_collection(ph_collection *cl, ph_body bd)
+void    add_to_collection(ph_collection *c, ph_body bd)
 {
-    if (cl->count >= cl->capacity)
+    if (c->count >= c->capacity)
     {
-        if (cl->capacity < MEM_STEP)
-            cl->capacity = MEM_STEP;
+        if (c->capacity < MEM_STEP)
+            c->capacity = MEM_STEP;
         else
-            cl->capacity *= 2;
-        cl->items = realloc(cl->items, sizeof(bd) * cl->capacity);
+            c->capacity *= 2;
+        c->items = realloc(c->items, sizeof(bd) * c->capacity);
     }
-    cl->items[cl->count] = bd;
-    cl->count++;
+    c->items[c->count] = bd;
+    c->count++;
 }
 
-void    remove_from_collection(ph_collection *cl, size_t index)
+void    remove_from_collection(ph_collection *c, size_t index)
 {
-    if (index >= cl->count)
+    if (index >= c->count)
         return ;
 
-    cl->count--;
-    if (index < cl->count)
+    c->count--;
+    if (index < c->count)
     {
         // O(1) and preserves order
-        memmove(&cl->items[index],
-                &cl->items[index + 1],
-                (cl->count - index) * sizeof(*cl->items));
+        memmove(&c->items[index],
+                &c->items[index + 1],
+                (c->count - index) * sizeof(*c->items));
     }
 }
 
