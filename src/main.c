@@ -10,11 +10,14 @@
  * - material bouncy-ness
  * - drag rework: air drag vs. surface-friction
  * - object rotation
- * - collission grid // multithreading
  * - stationary element placement
  * - 4-directional element resizing
  * - element preview
  * - different shapes (circle, triangle)
+ * 
+ * Optimization:
+ * - physics grid
+ * - multithreading
  */
 
 static const ph_body DEFAULT_BODY = {
@@ -139,8 +142,14 @@ void    draw_log(game_state *state)
         fpsc = RED;
     DrawText(TextFormat("FPS: %d", (int)(effps)), 10, 10, 10, fpsc);
     DrawText(TextFormat("Phys Entities:"), 10, 30, 10, LIGHTGRAY);
-    DrawText(TextFormat("Total: %ld", state->c.count), 10, 45, 10, LIGHTGRAY);
-    DrawText(TextFormat("Active: %d", state->c.active), 10, 60, 10, LIGHTGRAY);
+    DrawText(TextFormat("Total:"), 10, 45, 10, LIGHTGRAY);
+    DrawText(TextFormat("Active:"), 10, 60, 10, LIGHTGRAY);
+    DrawText(TextFormat("Dropped:"), 10, 75, 10, LIGHTGRAY);
+    DrawText(TextFormat("Colls:"), 10, 90, 10, LIGHTGRAY);
+    DrawText(TextFormat("%ld", state->c.count), 70, 45, 10, LIGHTGRAY);
+    DrawText(TextFormat("%ld", state->stats.active), 70, 60, 10, LIGHTGRAY);
+    DrawText(TextFormat("%ld", state->stats.dropped), 70, 75, 10, LIGHTGRAY);
+    DrawText(TextFormat("%ld", state->stats.collissions), 70, 90, 10, LIGHTGRAY);
 }
 
 ph_body create_body_xy(Vector2 pos, Vector3 dim)
@@ -217,7 +226,7 @@ void update_physics(game_state *state)
     while (max_steps-- && (state->dt_phys >= 1.0f / state->ph.fps))
     {
         i = 0;
-        state->c.active = 0;
+        state->stats.active = 0;
         while (i < state->c.count)
         {
             bd = &(state->c.items[i]);
@@ -228,7 +237,7 @@ void update_physics(game_state *state)
                 || (bd->pos.x >= (float)state->gfx.width && bd->v.x >= 0)
                 || (bd->pos.x <= 0.0f - bd->dim.x && bd->v.x <= 0))
             {
-                TraceLog(LOG_INFO, "it's gone");
+                state->stats.dropped++;
                 remove_from_collection(&state->c, i);
                 continue;
             }
@@ -237,7 +246,7 @@ void update_physics(game_state *state)
             // skip elements at rest
             if (bd->settled || bd->stationary)
                 continue;
-            state->c.active++;
+            state->stats.active++;
             float   acc_y = 0.0f; 
             int     ix = (int)floorf(bd->pos.x);
             int     iw = (int)ceilf(bd->dim.x);
@@ -249,7 +258,8 @@ void update_physics(game_state *state)
             if (iw + ix >= state->gfx.width)
                 iw = state->gfx.width - ix;
 
-            resolve_collission(get_collission(&state->c, bd, 0));
+            if (resolve_collission(get_collission(&state->c, bd, 0)))
+                state->stats.collissions++;
 
             if (bd->stationary || bd->settled)
                 continue;
@@ -263,30 +273,44 @@ void update_physics(game_state *state)
     }
 }
 
-void    resolve_collission(ph_collission clash)
+bool    resolve_collission(ph_collission clash)
 {
-    if (clash.cl)
+    if (!clash.cl)
+        return (false);
+
+    ph_body *st = NULL;
+    ph_body *mv = NULL;
+
+    if (clash.og->v.y == 0 && (clash.og->stationary || clash.og->settled))
     {
-        if (clash.og->stationary || clash.og->settled
-         || clash.cl->stationary || clash.cl->settled)
-        {
-            clash.og->v.y = clash.cl->v.y = 0.0f;
-            clash.og->settled = clash.cl->settled = true;
-            return;
-        }
-        // TODO: how/wether to handle cascading collissions due
-        // to changing position; currently, we just implicitly defer
-        // to the next physics frame
-        clash.og->pos.y = clash.cl->pos.y > clash.og->pos.y ?
-            clash.cl->pos.y - clash.og->dim.y : clash.og->pos.y;
-        clash.cl->pos.y  = clash.cl->pos.y < clash.og->pos.y ?
-            clash.og->pos.y - clash.cl->dim.y : clash.cl->pos.y;
-        float v = (clash.og->mass * clash.og->v.y
-                    + clash.cl->mass * clash.cl->v.y)
-                / (clash.og->mass + clash.cl->mass);
-        clash.og->v.y = v;
-        clash.cl->v.y = v;
+        st = clash.og;
+        mv = clash.cl;
     }
+    if (clash.cl->v.y == 0 && (clash.cl->stationary || clash.cl->settled))
+    {
+        st = clash.cl;
+        mv = clash.og;
+    }
+    if (st)
+    {
+        mv->pos.y = st->pos.y
+            - (mv->dim.y * (mv->v.y > 0))
+            + (st->dim.y * (mv->v.y < 0));
+        mv->v.y = 0.0f;
+        mv->settled = true;
+        return (true);
+    }
+
+    clash.og->pos.y = clash.cl->pos.y > clash.og->pos.y ?
+        clash.cl->pos.y - clash.og->dim.y : clash.og->pos.y;
+    clash.cl->pos.y  = clash.cl->pos.y < clash.og->pos.y ?
+        clash.og->pos.y - clash.cl->dim.y : clash.cl->pos.y;
+    float v = (clash.og->mass * clash.og->v.y
+                + clash.cl->mass * clash.cl->v.y)
+            / (clash.og->mass + clash.cl->mass);
+    clash.og->v.y = v;
+    clash.cl->v.y = v;
+    return (true);
 }
 
 ph_collission get_collission(ph_collection *c, ph_body *bd, size_t i)

@@ -38,10 +38,15 @@ typedef struct {
 } ph_body;
 
 typedef struct {
+    size_t  active;
+    size_t  collissions;
+    size_t  dropped;
+} ph_stats;
+
+typedef struct {
     ph_body *items;
     size_t  count;
     size_t  capacity;
-    size_t  active;
 } ph_collection;
 
 typedef struct {
@@ -74,6 +79,7 @@ typedef struct {
     float           dt_draw;
     float           dt_phys;
     float           dt_game;
+    ph_stats        stats;
 } game_state;
 
 ph_body         create_ph_body(float, float, float, float, float);
@@ -87,7 +93,7 @@ ph_body         create_body_xy(Vector2, Vector3);
 void            spawn_physics_body(ph_collection *, ph_body);
 int             detect_collission(ph_body *, ph_body *);
 ph_collission   get_collission(ph_collection *, ph_body *, size_t);
-void            resolve_collission(ph_collission);
+bool            resolve_collission(ph_collission);
 void            draw_collection(ph_collection *);
 void            draw_log(game_state *);
 int             sort_ph_collection_comp(const void *, const void *);
