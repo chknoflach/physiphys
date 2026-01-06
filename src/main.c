@@ -1,23 +1,7 @@
 #include "physiphys.h"
 
 /*
- * Next Steps:
- *
- * - Positioning & size relative to window dimensions
- * - World Boundaries instead of Window (incl. coordinate system)
- * - Stability & falling
- * - x-velocity
- * - material bouncy-ness
- * - drag rework: air drag vs. surface-friction
- * - object rotation
- * - stationary element placement
- * - 4-directional element resizing
- * - element preview
- * - different shapes (circle, triangle)
- * 
- * Optimization:
- * - physics grid
- * - multithreading
+ * [backup version] v0-simple
  */
 
 static const ph_body DEFAULT_BODY = {
