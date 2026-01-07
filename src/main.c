@@ -1,79 +1,41 @@
 #include "physiphys.h"
 
-/*
- * Next Steps:
- *
- * - Positioning & size relative to window dimensions
- * - World Boundaries instead of Window (incl. coordinate system)
- * - Stability & falling
- * - x-velocity
- * - material bouncy-ness
- * - drag rework: air drag vs. surface-friction
- * - object rotation
- * - stationary element placement
- * - 4-directional element resizing
- * - element preview
- * - different shapes (circle, triangle)
- * 
- * Optimization:
- * - physics grid
- * - multithreading
- */
-
-static const ph_body DEFAULT_BODY = {
-    .mass = 1.0f,
-    .drag = 0.2f,
-    .g_tweak = 1.0f,
-    .pos.x = 0.0f,
-    .pos.y = 0.0f,
-    .v.x = 0.0f,
-    .v.y = 0.0f,
-    .dim.x = 1.0f,
-    .dim.y = 1.0f,
-    .dim.z = 1.0f,
-    .settled = false,
-    .stationary = false,
-    .material.color = RED,
-    .material.hard = 1.0f,
-    .material.smooth = 1.0f,
-    .material.elastic = 1.0f
-};
-
 int main(void)
 {
-    game_state  state = {0};
-
-    state.ups = 720;
-    state.size = 5;
-    
-    state.gfx.width = 800;
-    state.gfx.height = 600;
-    state.gfx.fps = 60;
-
-    state.ph.g = 9.81f;
-    state.ph.g_px = state.ph.g * 200.0f;
-    state.ph.fps = 240;
-
-    state.flags |= FLAG_LOG;
-
-    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
-    InitWindow(state.gfx.width, state.gfx.height, "raylib test");
-    _reset(&state);
-
-    while (!WindowShouldClose())
-    {
-        state.dt = GetFrameTime();
-        update_inputs(&state);
-        update_game(&state);
-        update_physics(&state);
-        BeginDrawing();
-        update_draw(&state);
-        EndDrawing();
-    }
-    CloseWindow();
-    return (0);
+//    game_state  state = {0};
+//
+//    state.ups = 720;
+//    state.size = 5;
+//    
+//    state.gfx.width = 800;
+//    state.gfx.height = 600;
+//    state.gfx.fps = 60;
+//
+//    state.ph.g = 9.81f;
+//    state.ph.g_px = state.ph.g * 200.0f;
+//    state.ph.fps = 240;
+//
+//    state.flags |= FLAG_LOG;
+//
+//    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
+//    InitWindow(state.gfx.width, state.gfx.height, "raylib test");
+//    _reset(&state);
+//
+//    while (!WindowShouldClose())
+//    {
+//        state.dt = GetFrameTime();
+//        update_inputs(&state);
+//        update_game(&state);
+//        update_physics(&state);
+//        BeginDrawing();
+//        update_draw(&state);
+//        EndDrawing();
+//    }
+//    CloseWindow();
+//    return (0);
 }
 
+/*
 void    update_inputs(game_state *state)
 {
     if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_R))
@@ -158,7 +120,7 @@ void    draw_log(game_state *state)
     DrawText(TextFormat("%ld", state->c.count), 70, 45, 10, LIGHTGRAY);
     DrawText(TextFormat("%ld", state->stats.active), 70, 60, 10, LIGHTGRAY);
     DrawText(TextFormat("%ld", state->stats.dropped), 70, 75, 10, LIGHTGRAY);
-    DrawText(TextFormat("%ld", state->stats.collissions), 70, 90, 10, LIGHTGRAY);
+    DrawText(TextFormat("%ld", state->stats.collisions), 70, 90, 10, LIGHTGRAY);
 }
 
 ph_body create_body_xy(Vector2 pos, Vector3 dim, Vector3 v)
@@ -173,14 +135,14 @@ ph_body create_body_xy(Vector2 pos, Vector3 dim, Vector3 v)
 
 void spawn_physics_body(ph_collection *c, ph_body bd)
 {
-    ph_collission   check;
+    ph_collision   check;
 
-    check = get_collission(c, &bd, 0);
+    check = get_collision(c, &bd, 0);
     if (check.cl == 0)
         add_to_collection(c, bd);
 }
 
-int detect_collission(ph_body *a, ph_body *b)
+int detect_collision(ph_body *a, ph_body *b)
 {
     if (a == b)
         return (0);
@@ -268,9 +230,9 @@ void update_physics(game_state *state)
 
             for (int k = 0; k < COLLISSION_PASSES; k++)
             {
-                if (!resolve_collission(get_collission(&state->c, bd, 0)))
+                if (!resolve_collision(get_collision(&state->c, bd, 0)))
                     break;
-                state->stats.collissions++;
+                state->stats.collisions++;
                 if (bd->stationary || bd->settled)
                     break;
             }
@@ -314,7 +276,7 @@ void    update_ph_body_pos(ph_body *bd, float x, float y, float z)
     bd->pos.z = z;
 }
 
-bool    resolve_collission(ph_collission clash)
+bool    resolve_collision(ph_collision clash)
 {
     ph_body *a = clash.og;
     ph_body *b = clash.cl;
@@ -403,12 +365,12 @@ bool    resolve_collission(ph_collission clash)
     return (true);
 }
 
-ph_collission get_collission(ph_collection *c, ph_body *bd, size_t i)
+ph_collision get_collision(ph_collection *c, ph_body *bd, size_t i)
 {
-    ph_collission ret = {0};
+    ph_collision ret = {0};
     ret.og = bd;
  
-    while (i < c->count && !detect_collission(ret.og, &c->items[i])) i++;
+    while (i < c->count && !detect_collision(ret.og, &c->items[i])) i++;
     if (i < c->count)
     {
         ret.cl = &c->items[i];
@@ -458,3 +420,4 @@ ph_body    create_ph_body(float mass, float drag, float x, float y, float z)
     bd.dim.z = z;
     return (bd);
 }
+*/

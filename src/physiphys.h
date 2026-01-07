@@ -1,67 +1,121 @@
-#include "raylib.h"
-#include <stdio.h>
-#include <math.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
+#include <math.h>
 #include <float.h>
+#include <stdint.h>
+#include "raylib.h"
 
 #define MEM_STEP            64
-#define COLLISSION_PASSES   4
+#define COLLISION_PASSES    4
 
-#define FLAG_LOG            (1u << 0)
+typedef uint32_t update_flags;
+enum {
+    UPDATE_FLAG_NONE         = (0),
+    UPDATE_FLAG_RESET        = (1u << 0),
+    UPDATE_FLAG_SIZEYUP      = (1u << 1),
+    UPDATE_FLAG_SIZEXUP      = (1u << 2),
+    UPDATE_FLAG_SIZEYDN      = (1u << 3),
+    UPDATE_FLAG_SIZEXDN      = (1u << 4)
+};
 
-#define DEFER_RESET         (1u << 0)
-#define DEFER_SIZE_PLUS     (1u << 1)
-#define DEFER_SIZE_MINUS    (1u << 2)
+typedef uint32_t ph_flags;
+enum {
+    PH_FLAG_NONE            = (0),
+    PH_FLAG_SETTLED         = (1u << 0)
+};
 
-/*    Color colors[MAX_COLORS_COUNT] = {
-        DARKGRAY, MAROON, ORANGE, DARKGREEN, DARKBLUE, DARKPURPLE, DARKBROWN,
-        GRAY, RED, GOLD, LIME, BLUE, VIOLET, BROWN, LIGHTGRAY, PINK, YELLOW,
-        GREEN, SKYBLUE, PURPLE, BEIGE };
- */
+typedef uint32_t draw_flags;
+enum {
+    DRAW_FLAG_NONE          = (0),
+    DRAW_FLAG_LOG           = (1u << 0)
+};
+
+typedef enum {
+    PROJECTION_PERSPECTIVE,
+    PROJECTION_ORTHOGRAPHIC
+} projection;
+
+typedef uint32_t entity_id;
+
+#define ENTID_INDEX_BITS    20
+#define ENTID_GEN_BITS      12
+#define ENTID_INDEX_MASK    ((1u << ENTID_INDEX_BITS) - 1)
+
 typedef struct {
-    Color   color;
-    float   hard;
-    float   smooth;
-    float   elastic;
+    Vector3 v;
+    Vector3 pos;
+} ph_state;
+
+typedef struct {
+    uint8_t _placeholder;
 } ph_material;
 
 typedef struct {
-    float           mass;       // mass in kg
-    float           drag;       // drag coefficient
-    float           g_tweak;    // manual gravity tweak; 1.0f = normal
-    Vector3         v;          // m/s
-    Vector3         v_prev;     // m/s
-    Vector3         pos;        // meters
-    Vector3         pos_prev;   // prev step position
-    Vector3         dim;        // dimensions as bounding box
-    bool            settled;    // is this body at rest?
-    bool            stationary; // marks as immovable
-    ph_material     material;
+    float               inv_mass;
+    float               drag;
+    Vector3             size;
+    ph_state            cur;
+    ph_state            prev;
+    ph_flags            flags;
+    const ph_material   *material;
+    Vector3             force;
 } ph_body;
 
+typedef uint32_t dense_i;
 typedef struct {
-    size_t  active;
-    size_t  collissions;
-    size_t  dropped;
-} ph_stats;
+    dense_i from;
+    dense_i to;
+    Vector3 normal;
+    float   penetration;
+} ph_contact;
 
 typedef struct {
-    ph_body *items;
-    size_t  count;
-    size_t  capacity;
-} ph_collection;
+    Color   color;
+} gfx_sprite;
 
 typedef struct {
-    ph_body *og;
-    ph_body *cl;
-    size_t  i;
-} ph_collission;
+    gfx_sprite  sprite;
+} gfx_comp;
+
+#define SPA_INVALID_INDEX UINT32_MAX
+
+typedef struct {
+    ph_body     *dense;
+    entity_id   *dense_e;
+    uint32_t    *sparse;
+    uint32_t    count;
+    uint32_t    cap;
+} ph_spa;
+
+typedef struct {
+    gfx_comp    *dense;
+    entity_id   *dense_e;
+    uint32_t    *sparse;
+    uint32_t    count;
+    uint32_t    cap;
+} gfx_spa;
+
+typedef struct {
+    uint32_t    next_index;
+
+    uint32_t    *re;
+    uint32_t    re_count;
+    uint32_t    re_cap;
+    
+    uint16_t    *gen;
+    uint32_t    gen_cap;
+} id_pool;
+
+typedef struct {
+    id_pool pool;
+    ph_spa      ph;
+    gfx_spa     render;
+} scene;
 
 typedef struct {
     float   g;
-    size_t  g_px;
-    size_t  fps;
+    int     hz;
 } ph_settings;
 
 typedef struct {
@@ -71,37 +125,108 @@ typedef struct {
 } gfx_settings;
 
 typedef struct {
-    gfx_settings    gfx;
-    ph_settings     ph;
-    ph_collection   c;
-    size_t          flags;
-    size_t          defer;
-    float           size;
-    float           dt;
-    float           ups;
-    float           dt_draw;
-    float           dt_phys;
-    float           dt_game;
-    ph_stats        stats;
-    Vector2         mouse_prev;
+    Vector3     position;
+    Vector3     target;
+    Vector3     up;
+    float       fovy;
+    projection  projection;
+} gfx_cam_3d;
+
+typedef struct {
+    float   acc;
+    float   step;
+} time_step;
+
+typedef struct {
+    struct {
+        gfx_settings    gfx;
+        ph_settings     ph;
+    } cfg;
+    struct {
+        update_flags    update;
+        draw_flags      draw;
+    } flags;
+    struct {
+        size_t          active;
+        size_t          collisions;
+        size_t          dropped;
+    } stats;
+    struct {
+        Vector2         mouse_prev;
+    } input;
+    time_step           ph_clock;
+    scene               active_scene;
 } game_state;
 
-ph_body         create_ph_body(float, float, float, float, float);
-void            add_to_collection(ph_collection *, ph_body);
-void            remove_from_collection(ph_collection *, size_t);
-void            update_inputs(game_state *);
-void            update_game(game_state *);
-void            update_physics(game_state *);
-void            update_draw(game_state *);
-ph_body         create_body_xy(Vector2, Vector3, Vector3);
-void            update_ph_body_pos(ph_body *, float, float, float);
-void            update_ph_body_v(ph_body *, float, float, float);
-void            spawn_physics_body(ph_collection *, ph_body);
-int             detect_collission(ph_body *, ph_body *);
-ph_collission   get_collission(ph_collection *, ph_body *, size_t);
-bool            resolve_collission(ph_collission);
-void            draw_collection(ph_collection *);
-void            draw_log(game_state *);
-int             sort_ph_collection_comp(const void *, const void *);
-void            _reset(game_state *);
 
+entity_id   entid_make(uint32_t index, uint32_t gen);
+uint32_t    entid_index(entity_id id);
+uint32_t    entid_gen(entity_id id);
+
+void        id_pool_init(id_pool *p, uint32_t initial_cap);
+void        id_pool_free(id_pool *p);
+
+entity_id   entity_create(id_pool *p);
+void        entity_destroy(id_pool *p, entity_id id);
+bool        entity_alive(const id_pool *p, entity_id id);
+
+void        ph_spa_init(ph_spa *s, uint32_t dense_cap, uint32_t sparse_cap);
+void        ph_spa_free(ph_spa *s);
+
+bool        ph_spa_has(const ph_spa *s, entity_id e);
+ph_body*    ph_spa_get(ph_spa *s, entity_id e);
+
+ph_body*    ph_spa_add(ph_spa *s, entity_id e, ph_body value);
+bool        ph_spa_remove(ph_spa *s, entity_id e);
+
+entity_id   ph_spa_entity_at(const ph_spa *s, dense_i di);
+ph_body*    ph_spa_dense_at(ph_spa *s, dense_i di);
+
+
+void        gfx_spa_init(gfx_spa *s, uint32_t dense_cap, uint32_t sparse_cap);
+void        gfx_spa_free(gfx_spa *s);
+
+bool        gfx_spa_has(const gfx_spa *s, entity_id e);
+gfx_comp*   gfx_spa_get(gfx_spa *s, entity_id e);
+
+gfx_comp*   gfx_spa_add(gfx_spa *s, entity_id e, gfx_comp value);
+bool        gfx_spa_remove(gfx_spa *s, entity_id e);
+
+
+void        scene_init(scene *sc, uint32_t entity_cap);
+void        scene_free(scene *sc);
+
+entity_id   scene_create_entity(scene *sc);
+void        scene_destroy_entity(scene *sc, entity_id e);
+
+ph_body*    scene_add_ph(scene *sc, entity_id e, ph_body body);
+gfx_comp*   scene_add_gfx(scene *sc, entity_id e, gfx_comp comp);
+
+ph_body*    scene_get_ph(scene *sc, entity_id e);
+gfx_comp*   scene_get_gfx(scene *sc, entity_id e);
+
+bool        scene_remove_ph(scene *sc, entity_id e);
+bool        scene_remove_gfx(scene *sc, entity_id e);
+
+
+bool        ph_aabb_overlap(const ph_body *a, const ph_body *b);
+bool        ph_contact_build(const ph_body *a, const ph_body *b, ph_contact *out);
+bool        ph_contact_resolve(scene *sc, ph_contact c);
+
+
+void        game_init(game_state *st);
+void        game_reset(game_state *st);
+
+void        game_scan_input(game_state *st);
+void        game_fixed_update(game_state *st, float step); // apply deferred ops + spawning, etc.
+
+void        game_physics_step(game_state *st, float step);
+void        game_render(const game_state *st, float alpha);
+
+void        game_draw_log(const game_state *st);
+
+ph_body     ph_body_default(void);
+ph_body     ph_body_make_box(Vector3 pos, Vector3 size, Vector3 v, float inv_mass, float drag);
+void        ph_body_apply_force(ph_body *b, Vector3 f);
+
+entity_id   scene_spawn_box(scene *sc, ph_body body, gfx_comp gfx);
