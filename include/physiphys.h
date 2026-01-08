@@ -31,11 +31,6 @@ enum {
     DRAW_FLAG_LOG           = (1u << 0)
 };
 
-typedef enum {
-    PROJECTION_PERSPECTIVE,
-    PROJECTION_ORTHOGRAPHIC
-} projection;
-
 typedef uint32_t entity_id;
 
 #define ENTID_INDEX_BITS    20
@@ -77,8 +72,6 @@ typedef struct {
 typedef struct {
     gfx_sprite  sprite;
 } gfx_comp;
-
-#define SPA_INVALID_INDEX UINT32_MAX
 
 typedef struct {
     ph_body     *dense;
@@ -123,14 +116,6 @@ typedef struct {
     int     height;
     int     fps;
 } gfx_settings;
-
-typedef struct {
-    Vector3     position;
-    Vector3     target;
-    Vector3     up;
-    float       fovy;
-    projection  projection;
-} gfx_cam_3d;
 
 typedef struct {
     float   acc;
@@ -214,7 +199,7 @@ bool        ph_contact_build(const ph_body *a, const ph_body *b, ph_contact *out
 bool        ph_contact_resolve(scene *sc, ph_contact c);
 
 
-void        game_init(game_state *st);
+void        game_init(game_state *st, const char *cfg);
 void        game_reset(game_state *st);
 
 void        game_scan_input(game_state *st);

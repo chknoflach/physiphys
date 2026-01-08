@@ -1,19 +1,25 @@
 #include "physiphys.h"
 
+void game_init(game_state *st, const char *cfg)
+{
+    st->cfg.gfx.fps = 60;
+    st->cfg.gfx.width = 1280;
+    st->cfg.gfx.height = 960;
+    st->cfg.ph.g = 9.81f;
+    st->cfg.ph.hz = 120;
+
+    st->flags.draw |= DRAW_FLAG_LOG;
+
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
+}
+
 int main(void)
 {
-//    game_state  state = {0};
-//
-//    state.ups = 720;
-//    state.size = 5;
-//    
-//    state.gfx.width = 800;
-//    state.gfx.height = 600;
-//    state.gfx.fps = 60;
-//
-//    state.ph.g = 9.81f;
-//    state.ph.g_px = state.ph.g * 200.0f;
-//    state.ph.fps = 240;
+    game_state state = {0};
+
+    game_init(&state, "./path/to/config");
+}
+
 //
 //    state.flags |= FLAG_LOG;
 //
@@ -33,7 +39,6 @@ int main(void)
 //    }
 //    CloseWindow();
 //    return (0);
-}
 
 /*
 void    update_inputs(game_state *state)
